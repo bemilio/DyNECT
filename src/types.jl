@@ -1,11 +1,11 @@
 struct DyNEP # Dynamic Nash equilibrium problem
     nx::Int64
-    nu::Vector{Tuple{Int64,Int64}}
+    nu::Vector{Int64}
     N::Int64
     ## Control problem quantities
     A::Matrix{Float64}
     B::Matrix{Float64} # B = [Bi[1], Bi[2], ...]
-    Bi::Vector{SubArray} # Views on B
+    Bi::Vector{SubArray{Float64,2}} # Views on B
     Q::Vector{Matrix{Float64}}
     R::Vector{Matrix{Float64}}
     P::Vector{Matrix{Float64}}
@@ -17,16 +17,16 @@ struct DyNEP # Dynamic Nash equilibrium problem
     # Local input constraints in the form C_loc*u <= b_loc
     C_loc::Matrix{Float64} # C_loc = diag(C_loc_i[1], C_loc_i[2], ...)
     b_loc::Vector{Float64} # b_loc = [b_loc_i[1], b_loc_i[2], ...]
-    C_loc_i::Vector{SubArray} # Views on C_loc
-    b_loc_i::Vector{SubArray} # Views on b_loc
+    C_loc_i::Vector{SubArray{Float64,2}} # Views on C_loc
+    b_loc_i::Vector{SubArray{Float64,1}} # Views on b_loc
     m_loc::Vector{Int64} # Number of local constraints per each agent
     # Shared input constraints in the form C_u * u <= b_u
     C_u::Matrix{Float64} # C_u = [C_u_i[1], C_u_i[2], ...]
-    b_u::Matrix{Float64}
-    C_u_i::Vector{SubArray} # Views on C_u
+    b_u::Vector{Float64}
+    C_u_i::Vector{SubArray{Float64,2}} # Views on C_u
     m_u::Int64 # number of input constraints
 
-    function DyNEP(
+    function DyNEP(;
         A::Matrix{Float64},
         Bvec::Vector{Matrix{Float64}},
         Q::Vector{Matrix{Float64}},
@@ -57,7 +57,7 @@ struct DyNEP # Dynamic Nash equilibrium problem
 
         m_x = size(C_x, 1)
 
-        C_loc = BlockDiagonal(C_loc_vec)
+        C_loc = Matrix(BlockDiagonal(C_loc_vec))
         b_loc = vcat(b_loc_vec...)
         m_loc = map(x -> size(x, 1), C_loc_vec)
         # Create C_loc_i, b_loc_i as views on C_loc, b_loc

@@ -43,18 +43,17 @@ end
     b_u = rand(mu)
 
     prob = DyNEP(
-        A::Matrix{Float64},
-        Bvec::Vector{Matrix{Float64}},
-        Q::Vector{Matrix{Float64}},
-        R::Vector{Matrix{Float64}},
-        P::Vector{Matrix{Float64}},
-        C_x::Matrix{Float64},
-        b_x::Vector{Float64},
-        C_loc_vec::Vector{Matrix{Float64}},
-        b_loc_vec::Vector{Vector{Float64}},
-        C_u_vec::Vector{Matrix{Float64}},
-        b_u::Vector{Float64}
-    )
+        A=A,
+        Bvec=Bvec,
+        Q=Q,
+        R=R,
+        P=P,
+        C_x=C_x,
+        b_x=b_x,
+        C_loc_vec=C_loc_vec,
+        b_loc_vec=b_loc_vec,
+        C_u_vec=C_u_vec,
+        b_u=b_u)
 
     mpVI = generate_mpVI(prob, T_hor)
 

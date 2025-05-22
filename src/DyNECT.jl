@@ -1,8 +1,8 @@
 module DyNECT
 
-using LinearAlgebra, BlockDiagonals
+using LinearAlgebra
 
-export DyNEP
+export DyNEP, generate_mpVI
 
 include("types.jl")
 include("utils.jl")
