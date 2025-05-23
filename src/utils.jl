@@ -48,7 +48,7 @@ function generate_mpVI(prob::DyNEP, T_hor::Int64)
         vcat([kron(ones(T_hor), prob.b_loc_i[i]) for i in 1:prob.N]...)] # Local input constraints
 
     # VI(H*x + F*x0 + f, D*x <= E*x0 + d)
-    mpVI = MPVI(H, F, f, D, E, d) #TODO: Define constructor
+    return ParametricDAQP.MPVI(Matrix(H), F, f, D, E, d)
 end
 
 function generate_prediction_model(A::Matrix{Float64}, Bi::Vector{<:AbstractMatrix{Float64}}, T_hor::Int)

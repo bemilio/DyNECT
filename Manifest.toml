@@ -2,7 +2,7 @@
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "fb2c2a689699020f034db7f4de0932eeeabfb2df"
+project_hash = "5ddc51c172ec7e3139143a156f043452a9637690"
 
 [[deps.ArgCheck]]
 git-tree-sha1 = "f9e9a66c9b7be1ad7372bbd9b062d9230c30c5ce"
@@ -411,7 +411,7 @@ version = "0.12.3"
 
 [[deps.ParametricDAQP]]
 deps = ["DAQP", "DAQPBase", "LinearAlgebra", "PolyDAQP", "RecipesBase"]
-git-tree-sha1 = "da830c34d0d5da54ac4874d435ba4ca43283ae68"
+git-tree-sha1 = "a58763c6304b136ab5b97644c372fbc5d898872d"
 repo-rev = "mpVI"
 repo-url = "/home/ebenenati/Repositories/ParametricDAQP_mirror"
 uuid = "19f72acb-e2a9-45c8-96b9-4d5487c8db2e"

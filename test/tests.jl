@@ -28,7 +28,7 @@ end
 
     Q = [rand(nx, nx) for _ in 1:N]
     P = [rand(nx, nx) for _ in 1:N]
-    R = [rand(nu[j], nu[j]) for j in 1:N]
+    R = [100 * Matrix{Float64}(I, nu[j], nu[j]) for j in 1:N]
     # Constraints
     mx = 2
     C_x = rand(mx, nx)
