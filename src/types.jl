@@ -31,7 +31,7 @@ struct DyNEP # Dynamic Nash equilibrium problem
         Bvec::Vector{Matrix{Float64}},
         Q::Vector{Matrix{Float64}},
         R::Vector{Matrix{Float64}},
-        P::Vector{Matrix{Float64}},
+        P::Union{Nothing,Vector{Matrix{Float64}}}=nothing,
         C_x::Matrix{Float64},
         b_x::Vector{Float64},
         C_loc_vec::Vector{Matrix{Float64}},
@@ -82,6 +82,10 @@ struct DyNEP # Dynamic Nash equilibrium problem
         for i in 1:N
             n_cols = nu[i]
             C_u_i[i] = @view C_u[:, start_col:start_col+n_cols-1]
+        end
+
+        if isnothing(P)
+            P = Q
         end
 
         new(nx, nu, N, A, B, Bi, Q, R, P, C_x, b_x, m_x, C_loc, b_loc, C_loc_i, b_loc_i, m_loc, C_u, b_u, C_u_i, m_u)

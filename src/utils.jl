@@ -21,7 +21,8 @@ function generate_mpVI(prob::DyNEP, T_hor::Int64)
             H[Block(i, j)] = Γi[i]' * Q[i] * Γi[j]
         end
     end
-    sum!(H, BlockDiagonal(R))
+    H = H + Matrix{Float64}(BlockDiagonal(R))
+    # sum!(H, BlockDiagonal(R)) ## This does not work, why? 
 
     # Define F (maps from x0 to VI mapping)
     F = vcat([Γi[i]' * Q[i] * Θ for i in 1:prob.N]...)
@@ -73,4 +74,36 @@ function generate_prediction_model(A::Matrix{Float64}, Bi::Vector{<:AbstractMatr
         end
     end
     return Γ, Γi, Θ
+end
+
+
+function is_stabilizable(A, B)
+    # Hautus lemma for stabilizability
+    eigv_A = eigvals(A)
+    n_x = size(A, 1)
+    for λ in eigv_A
+        if abs(λ) ≥ 1
+            M = hcat(λ * I(n_x) - A, B)
+            if rank(M) < n_x
+                return false
+            end
+        end
+    end
+    return true
+end
+
+function is_detectable(A, C)
+    # Hautus lemma for stabilizability
+    eigv_A = eigvals(A)
+    n_x = size(A, 1)
+    is_stbl = true
+    for λ in eigv_A
+        if abs(λ) ≥ 1
+            M = vcat(λ * I(n_x) - A, C)
+            if rank(M) < n_x
+                return false
+            end
+        end
+    end
+    return true
 end
