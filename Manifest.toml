@@ -455,9 +455,9 @@ version = "0.21.4"
 
 [[deps.JSON3]]
 deps = ["Dates", "Mmap", "Parsers", "PrecompileTools", "StructTypes", "UUIDs"]
-git-tree-sha1 = "196b41e5a854b387d99e5ede2de3fcb4d0422aae"
+git-tree-sha1 = "411eccfe8aba0814ffa0fdf4860913ed09c34975"
 uuid = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
-version = "1.14.2"
+version = "1.14.3"
 
     [deps.JSON3.extensions]
     JSON3ArrowExt = ["ArrowTypes"]
@@ -681,9 +681,9 @@ version = "1.11.0"
 
 [[deps.MathOptInterface]]
 deps = ["BenchmarkTools", "CodecBzip2", "CodecZlib", "DataStructures", "ForwardDiff", "JSON3", "LinearAlgebra", "MutableArithmetics", "NaNMath", "OrderedCollections", "PrecompileTools", "Printf", "SparseArrays", "SpecialFunctions", "Test"]
-git-tree-sha1 = "d4eb6037ce33f974a58a2ea9ccba28beab2a93c1"
+git-tree-sha1 = "a946919f378668e92e6e3b8bde260999111ccd5f"
 uuid = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
-version = "1.40.1"
+version = "1.40.2"
 
 [[deps.MatrixEquations]]
 deps = ["LinearAlgebra", "LinearMaps"]
@@ -749,6 +749,18 @@ version = "0.1.0"
 [[deps.NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
 version = "1.2.0"
+
+[[deps.OSQP]]
+deps = ["Libdl", "LinearAlgebra", "MathOptInterface", "OSQP_jll", "SparseArrays"]
+git-tree-sha1 = "50faf456a64ac1ca097b78bcdf288d94708adcdd"
+uuid = "ab2f91bb-94b4-55e3-9ba0-7f65df51de79"
+version = "0.8.1"
+
+[[deps.OSQP_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "d0f73698c33e04e557980a06d75c2d82e3f0eb49"
+uuid = "9c4f68bf-6205-5545-a508-2878b064d984"
+version = "0.600.200+0"
 
 [[deps.Ogg_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -837,8 +849,8 @@ uuid = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 version = "0.12.3"
 
 [[deps.ParametricDAQP]]
-deps = ["DAQP", "DAQPBase", "LinearAlgebra", "PolyDAQP", "RecipesBase"]
-git-tree-sha1 = "5f9826dbb9c3d43b1dab99090db684ca1a243a19"
+deps = ["DAQP", "DAQPBase", "LinearAlgebra", "OSQP", "PolyDAQP", "RecipesBase", "SparseArrays"]
+git-tree-sha1 = "feafcb4e81ed522da251db73b5c9f906dae2d1dc"
 repo-rev = "mpVI"
 repo-url = "/home/ebenenati/Repositories/ParametricDAQP_mirror"
 uuid = "19f72acb-e2a9-45c8-96b9-4d5487c8db2e"
@@ -1117,9 +1129,9 @@ version = "1.0.1"
 
 [[deps.Tables]]
 deps = ["DataAPI", "DataValueInterfaces", "IteratorInterfaceExtensions", "OrderedCollections", "TableTraits"]
-git-tree-sha1 = "598cd7c1f68d1e205689b1c2fe65a9f85846f297"
+git-tree-sha1 = "f2c1efbc8f3a609aadf318094f8fc5204bdaf344"
 uuid = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"
-version = "1.12.0"
+version = "1.12.1"
 
 [[deps.Tar]]
 deps = ["ArgTools", "SHA"]

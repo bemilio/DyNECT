@@ -1,16 +1,12 @@
 using ParametricDAQP # For the mpVI type
 
-function find_CR(x0::Vector{Float64}, sol; eps_gap=1e-6)
+function find_CR(x0::Vector{Float64}, sol; eps_gap=1e-5)
     #Find the critical region for x0
     contained_in = Int64[]
     for (ind, region) in enumerate(sol.CRs)
-        try
-            violation = minimum(region.bth - region.Ath' * x0)
-            if (violation >= -eps_gap)
-                push!(contained_in, ind)
-            end
-        catch err
-            println("Error: ", err)
+        violation = minimum(region.bth - region.Ath' * x0)
+        if (violation >= -eps_gap)
+            push!(contained_in, ind)
         end
     end
     return isempty(contained_in) ? nothing : contained_in[1]

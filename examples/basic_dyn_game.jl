@@ -177,15 +177,18 @@ game = DyNEP(
     Bvec=B,
     Q=Q,
     R=R,
-    P=P,
     C_x=C_x,
     b_x=b_x,
     C_loc_vec=C_loc,
     b_loc_vec=b_loc,
     C_u_vec=C_u,
     b_u=b_u)
+P, K = DyNECT.solveOLNE(game)
+game.P[:] = P[:]
+opts = ParametricDAQP.Settings()
+opts.early_stop = true
 mpVI = generate_mpVI(game, T_hor)
-sol, _ = ParametricDAQP.mpsolve(mpVI, Theta)
+sol, _ = ParametricDAQP.mpsolve(mpVI, Theta; opts)
 
 
 

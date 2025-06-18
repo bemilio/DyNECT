@@ -3,12 +3,14 @@ using DyNECT
 using BlockDiagonals
 using ParametricDAQP
 using LinearAlgebra
+using Pkg
+Pkg.precompile()
 
-T_hor = 4
-u_max = [5., 5.]
-u_min = [-3., -5.]
+T_hor = 5
+u_max = [1., 0.5]
+u_min = [-0.5, -2.]
 
-A = [1. 1.; 0 1.]
+A = [0.7 1.; 0 0.5]
 
 B = [[0; 1.;;],
     [0; 1.;;]]
@@ -16,12 +18,11 @@ B = [[0; 1.;;],
 # Objectives
 Q = [[1. 0; 0 0],
     [0 0; 0 1.]]
-R = [3 * Matrix{Float64}(I(2)),
-    2 * Matrix{Float64}(I(2))]
+R = [[5.;;], [8.;;]]
 
-C_x = zeros(0, 2)
+C_x = [Matrix{Float64}(I(2)); -Matrix{Float64}(I(2))]
 
-b_x = zeros(0)
+b_x = [ones(2); ones(2)]
 
 C_loc = [[1.; -1.;;], [1.; -1.;;]]
 
@@ -32,7 +33,7 @@ b_u = zeros(0)
 
 # Range of initial states 
 nx = size(A, 1)
-Theta = (ub=5. * ones(nx), lb=-5. * ones(nx))
+Theta = (ub=1. * ones(nx), lb=-1. * ones(nx))
 
 game = DyNEP(
     A=A,
@@ -46,7 +47,50 @@ game = DyNEP(
     C_u_vec=C_u,
     b_u=b_u)
 
-game.P, K = DyNECT.solveOLNE(game)
+P, K = DyNECT.solveOLNE(game)
+game.P[:] = P[:]
 
 mpVI = generate_mpVI(game, T_hor)
-sol, _ = ParametricDAQP.mpsolve(mpVI, Theta)
+@time begin
+    sol, _ = ParametricDAQP.mpsolve(mpVI, Theta)
+end
+
+## Test solution
+tol = 10^(-5)
+all_good = true
+for i in 1:100
+    x0_test = ones(game.nx) - 2 * rand(game.nx)
+    # x0_test = [-0.7896149115496409, -0.5772141696821653]
+    ind = DyNECT.find_CR(x0_test, sol) # Find  CR corresponding to x0_test
+    # Extract primal solution
+    if !isnothing(ind)
+        usol = sol.CRs[ind].z' * [x0_test; 1]
+    end
+    uref, res = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x0_test; 1], mpVI.A, mpVI.B' * [x0_test; 1], tol=tol)
+    if isnothing(ind) && !isnothing(uref)
+        @warn "The explicit solution is infeasible, while the implicit solution is feasible"
+        println("Residual implicit = $res")
+        println("x0 = $x0_test")
+        global all_good = false
+    end
+    if !isnothing(ind) && isnothing(uref)
+        @warn "The Implicit solution is infeasible, while the Explicit solution is feasible"
+        global all_good = false
+    end
+    if isnothing(ind) && isnothing(uref)
+        println("Both explicit and implicit solution are infeasible")
+    end
+    if !isnothing(ind) && !isnothing(uref) && norm(uref - usol) > tol
+        @warn "Explicit and implicit solutions are different"
+        global all_good = false
+    end
+
+
+end
+if all_good
+    println("Explicit and implicit solutions are equal in all tested cases")
+end
+
+# Plot partitions
+
+display(ParametricDAQP.plot_regions(sol))
