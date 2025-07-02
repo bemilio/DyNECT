@@ -85,7 +85,7 @@ struct DyNEP # Dynamic Nash equilibrium problem
         end
 
         if isnothing(P)
-            P = Q
+            P = [zeros(nx, nx) for _ in 1:N]
         end
 
         new(nx, nu, N, A, B, Bi, Q, R, P, C_x, b_x, m_x, C_loc, b_loc, C_loc_i, b_loc_i, m_loc, C_u, b_u, C_u_i, m_u)

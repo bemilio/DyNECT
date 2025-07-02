@@ -31,6 +31,8 @@ function generate_mpVI(prob::DyNEP, T_hor::Int64)
     f = zeros(sum(prob.nu) * T_hor)
 
     ## Constraints
+    # C_x*x ≤ b_x  ==> C_x*Γ*u <= -C_x*Θ*x0+b_x
+
     # D_shar = row_stack([I ⊗ Du_i ; (I ⊗ Dx)*Γi ] )
     D_shar = hcat([[kron(I(T_hor), prob.C_u_i[i]);
         kron(I(T_hor), prob.C_x) * Γi[i]] for i in 1:prob.N]...)
@@ -42,7 +44,7 @@ function generate_mpVI(prob::DyNEP, T_hor::Int64)
     E = [zeros(T_hor * prob.m_u, prob.nx);       # Shared input constraints
         kron(I(T_hor), prob.C_x) * Θ;            # State constraints
         zeros(sum(prob.m_loc) * T_hor, prob.nx)] # Local input constraints
-
+    E = -E # Constraint convention
     # Affine part of the constraints
     d = [kron(ones(T_hor), prob.b_u);            # Shared input constraints
         kron(ones(T_hor), prob.b_x);             # State constraints

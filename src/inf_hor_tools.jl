@@ -2,7 +2,7 @@ using MatrixEquations
 using BlockDiagonals
 @enum method STEIN = 1
 
-function solveOLNE(game::DyNEP; method=STEIN, max_iter=1000)
+function solveOLNE(game::DyNEP; method=STEIN, max_iter=1000, stepsize=0.1)
     #  Check if basic assumptions are satisfied
     eps_err = 1e-5
     if minimum(abs.(eigvals(game.A))) < eps_err
@@ -24,14 +24,13 @@ function solveOLNE(game::DyNEP; method=STEIN, max_iter=1000)
 
     # Initialize to cooperative optimum
     R_all = BlockDiagonal(game.R)
-    P_0, _, K, _, _ = ared(game.A, game.B, R_all, sum(game.Q), zeros(game.nx, game.nx))
+    P_0, _, K, _, _ = ared(game.A, game.B, R_all, sum(game.Q), zeros(game.nx, sum(game.nu)))
     K = -K # Controller convention
-
     for k = 1:max_iter
         A_cl = game.A + game.B * K
         for i = 1:game.N
             try
-                P[i] = sylvd(-game.A', A_cl, game.Q[i]) # Solves P[i] - A' * P[i] * A_cl = Q[i]
+                P[i] = (1 - stepsize) * P[i] + stepsize * sylvd(-game.A', A_cl, game.Q[i]) # Solves P[i] - A' * P[i] * A_cl = Q[i]
             catch e
                 disp("[solveInfHorOL] An error occurred while solving the Sylvester equation: " + e.message)
                 return nothing
@@ -57,4 +56,22 @@ function solveOLNE(game::DyNEP; method=STEIN, max_iter=1000)
     # Separate controllers into list
     Ki = [K[s[i]+1:s[i+1], :] for i in 1:game.N]
     return P, Ki
+end
+
+function solveExtendedARE(game::DyNEP, K::Vector{<:AbstractMatrix})
+    nx = game.nx
+    P_ext = [zeros(2 * nx, 2 * nx) for _ in 1:game.N]
+    K_ext = [zeros(nu, 2 * nx) for nu in game.nu]
+    for i = 1:game.N
+        others = [j for j in 1:game.N if j != i]
+        BjKj = sum([game.Bi[j] * K[j] for j in others])
+        A_ol = game.A + game.B * vcat(K...)
+        A_ext = [game.A BjKj;
+            zeros(nx, nx) A_ol]
+        B_ext = [game.Bi[i]; zeros(nx, game.nu[i])]
+        Q_ext = [game.Q[i] zeros(nx, nx); zeros(nx, nx) zeros(nx, nx)]
+        R_ext = game.R[i]
+        P_ext[i], _, K_ext[i], _, _ = ared(A_ext, B_ext, R_ext, Q_ext, zeros(2 * nx, game.nu[i]))
+    end
+    return P_ext, K_ext
 end
