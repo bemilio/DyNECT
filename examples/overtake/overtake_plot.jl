@@ -11,13 +11,19 @@ b = 70.0   # semi-minor axis
 
 # Import positions and velocities
 # Import the CSV and recreate p1, v1, l1, p2, v2, l2 variables
-pv_imp_df_loaded = CSV.read("pv_imp_results.csv", DataFrame)
-p1 = pv_imp_df_loaded.p1
-v1 = pv_imp_df_loaded.v1
-l1 = pv_imp_df_loaded.l1
-p2 = pv_imp_df_loaded.p2
-v2 = pv_imp_df_loaded.v2
-l2 = pv_imp_df_loaded.l2
+if solve_explicit
+    println("Plotting results from explicit MPC...")
+    pv_loaded = CSV.read("pos_vel_explicit_results.csv", DataFrame)
+else
+    println("Plotting results from iterative-solution MPC...")
+    pv_loaded = CSV.read("pos_vel_implicit_results.csv", DataFrame)
+end
+p1 = pv_loaded.p1
+v1 = pv_loaded.v1
+l1 = pv_loaded.l1
+p2 = pv_loaded.p2
+v2 = pv_loaded.v2
+l2 = pv_loaded.l2
 # Make p1, p2 positive
 pmin = min(minimum(p1), minimum(p2))
 if pmin < 0.

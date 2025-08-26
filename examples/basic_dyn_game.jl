@@ -35,14 +35,6 @@ function first_input_of_sequence(u::Vector{Float64}, nu::Vector{Int64}, N::Int64
     return u_first
 end
 
-function MPC_control(x0::Vector{Float64}, sol, nu::Vector{Int64}, N::Int64, T_hor::Int64)
-    ind = find_CR(x0, sol)
-    # Extract primal solution
-    u = sol.CRs[ind].z' * [x0; 1]
-    # Extract first input of each agent's sequence
-    return first_input_of_sequence(u, nu, N, T_hor)
-end
-
 # 2-vehicles platooning
 # states:
 # 1) v1 - v_ref 
@@ -130,8 +122,8 @@ B = [[tau 0;
 # Objectives
 Q = [Matrix{Float64}(BlockDiagonal([Matrix{Float64}(I(2)), zeros(3, 3)])),
     Matrix{Float64}(BlockDiagonal([zeros(2, 2), Matrix{Float64}(I(3))]))]
-R = [3 * Matrix{Float64}(I(2)),
-    2 * Matrix{Float64}(I(2))]
+R = [[3 * Matrix{Float64}(I(2)), zeros(2, 2)],
+    [zeros(2, 2), 2 * Matrix{Float64}(I(2))]]
 P = Q
 
 C_x = [0 0 -1. 0 0; # Safety distance
@@ -244,7 +236,8 @@ x_exp = Vector{Vector{Float64}}(undef, T_sim)
 u_exp = Vector{Vector{Float64}}(undef, T_sim - 1)
 x_exp[1] = x0
 for t in 1:T_sim-1
-    u_exp[t] = vcat(MPC_control(x_exp[t], sol, game.nu, game.N, T_hor)...)
+    useq = evaluate_solution(sol, x_exp[t])
+    u_exp[t] = vcat(first_input_of_sequence(useq, game.nu, game.N, T_hor)...)
     x_exp[t+1] = game.A * x_exp[t] + game.B * u_exp[t]
 end
 diff = norm(x_exp - x_imp)

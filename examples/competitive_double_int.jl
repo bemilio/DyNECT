@@ -4,6 +4,7 @@ using BlockDiagonals
 using ParametricDAQP
 using LinearAlgebra
 using Pkg
+using Infiltrator
 Pkg.precompile()
 
 T_hor = 5
@@ -18,11 +19,11 @@ B = [[0; 1.;;],
 # Objectives
 Q = [[1. 0; 0 0],
     [0 0; 0 1.]]
-R = [[5.;;], [8.;;]]
+R = [[[5.;;], [0.;;]], [[0.;;], [8.;;]]]
 
 C_x = [Matrix{Float64}(I(2)); -Matrix{Float64}(I(2))]
 
-b_x = [ones(2); ones(2)]
+b_x = [5 * ones(2); 5 * ones(2)]
 
 C_loc = [[1.; -1.;;], [1.; -1.;;]]
 
@@ -33,7 +34,7 @@ b_u = zeros(0)
 
 # Range of initial states 
 nx = size(A, 1)
-Theta = (ub=1. * ones(nx), lb=-1. * ones(nx))
+Θ = (A=C_x', b=b_x, ub=6. * ones(nx), lb=-6. * ones(nx))
 
 game = DyNEP(
     A=A,
@@ -52,35 +53,42 @@ game.P[:] = P[:]
 
 mpVI = generate_mpVI(game, T_hor)
 @time begin
-    sol, _ = ParametricDAQP.mpsolve(mpVI, Theta)
+    sol, _ = ParametricDAQP.mpsolve(mpVI, Θ)
 end
 
 ## Test solution
 tol = 10^(-5)
 all_good = true
 for i in 1:100
-    x0_test = ones(game.nx) - 2 * rand(game.nx)
-    # x0_test = [-0.7896149115496409, -0.5772141696821653]
-    ind = DyNECT.find_CR(x0_test, sol) # Find  CR corresponding to x0_test
-    # Extract primal solution
-    if !isnothing(ind)
-        usol = sol.CRs[ind].z' * [x0_test; 1]
+    x0_test = 2 * ones(game.nx) - rand(game.nx)
+    # Check if x0_test is in Θ
+    if any(Θ.A' * x0_test .> Θ.b) || any(x0_test .> Θ.ub) || any(x0_test .< Θ.lb)
+        @warn "x0_test is outside of Θ"
+        continue
     end
+    usol = evaluate_solution(sol, x0_test)
+    # θ_normalized = (x0_test - sol.translation) .* sol.scaling
+    # all_CRs_indexes = ParametricDAQP.pointlocation(θ_normalized, sol.CRs)
+    # if !isempty(all_CRs_indexes)
+    #     CR = sol.CRs[all_CRs_indexes[1]]
+    #     usol = CR.z' * [θ_normalized; 1]
+    # end
+    # @infiltrate
     uref, res = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x0_test; 1], mpVI.A, mpVI.B' * [x0_test; 1], tol=tol)
-    if isnothing(ind) && !isnothing(uref)
+    if isnothing(usol) && !isnothing(uref)
         @warn "The explicit solution is infeasible, while the implicit solution is feasible"
         println("Residual implicit = $res")
         println("x0 = $x0_test")
         global all_good = false
     end
-    if !isnothing(ind) && isnothing(uref)
+    if !isnothing(usol) && isnothing(uref)
         @warn "The Implicit solution is infeasible, while the Explicit solution is feasible"
         global all_good = false
     end
-    if isnothing(ind) && isnothing(uref)
+    if isnothing(usol) && isnothing(uref)
         println("Both explicit and implicit solution are infeasible")
     end
-    if !isnothing(ind) && !isnothing(uref) && norm(uref - usol) > tol
+    if !isnothing(usol) && !isnothing(uref) && norm(uref - usol) > tol
         @warn "Explicit and implicit solutions are different"
         global all_good = false
     end

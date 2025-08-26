@@ -3,6 +3,16 @@ using BlockDiagonals
 @enum method STEIN = 1
 
 function solveOLNE(game::DyNEP; method=STEIN, max_iter=1000, stepsize=0.1)
+    if any(norm(qi) > 1e-5 for qi in game.q) ||
+       any(norm(ri) > 1e-5 for ri in game.r) ||
+       norm(game.c) > 1e-5
+        throw(ErrorException("Affine part in objective or dynamics is not supported for the infinite-horizon OLNE solution."))
+    end
+
+    if any(norm(game.R[i][j]) > 1e-5 && i != j for i in 1:game.N for j in 1:game.N)
+        throw(ErrorException("Cross-weights between input objectives (off-diagonal elements in R) are not supported for the infinite-horizon OLNE solution."))
+    end
+
     #  Check if basic assumptions are satisfied
     eps_err = 1e-5
     if minimum(abs.(eigvals(game.A))) < eps_err
@@ -17,13 +27,13 @@ function solveOLNE(game::DyNEP; method=STEIN, max_iter=1000, stepsize=0.1)
         end
     end
     P = [zeros(game.nx, game.nx) for _ in 1:game.N]
-    Rinv = BlockDiagonal([inv(Ri) for Ri in game.R])
+    Rinv = BlockDiagonal([inv(game.R[i][i]) for i in 1:game.N])
     RinvB = Rinv * BlockDiagonal(game.Bi)'
     # Matrix S: multiply by col(P_i) to get \sum B_i * R_i_inv * B_i' * P_i 
     S = game.B * RinvB # dim. (n_x,  N *nx)
 
     # Initialize to cooperative optimum
-    R_all = BlockDiagonal(game.R)
+    R_all = BlockDiagonal([game.R[i][i] for i in 1:game.N])
     P_0, _, K, _, _ = ared(game.A, game.B, R_all, sum(game.Q), zeros(game.nx, sum(game.nu)))
     K = -K # Controller convention
     for k = 1:max_iter
@@ -46,8 +56,11 @@ function solveOLNE(game::DyNEP; method=STEIN, max_iter=1000, stepsize=0.1)
             for i = 1:game.N
                 err = err + norm(game.Q[i] - P[i] + game.A' * P[i] * A_cl)
             end
-            println("[solveOLNE] Error = $err; Iter = $k")
+            # println("[solveOLNE] Error = $err; Iter = $k")
             if err < eps_err
+                if maximum(abs.(eigvals(A_cl))) > 1.0
+                    @warn "[solveInfHorOL] The solution is found, but it is not stabilizing"
+                end
                 break
             end
         end
@@ -70,7 +83,7 @@ function solveExtendedARE(game::DyNEP, K::Vector{<:AbstractMatrix})
             zeros(nx, nx) A_ol]
         B_ext = [game.Bi[i]; zeros(nx, game.nu[i])]
         Q_ext = [game.Q[i] zeros(nx, nx); zeros(nx, nx) zeros(nx, nx)]
-        R_ext = game.R[i]
+        R_ext = game.R[i][i]
         P_ext[i], _, K_ext[i], _, _ = ared(A_ext, B_ext, R_ext, Q_ext, zeros(2 * nx, game.nu[i]))
     end
     return P_ext, K_ext

@@ -1,10 +1,11 @@
 @enum Case begin
-    Platooning
+    Platooning = 1
     BeginOvertake
     PerformOvertake
     CompleteOvertake
     NormalOperation
 end
+
 
 # Unicycle model
 function unicycle!(dx, x, u, t)
@@ -16,86 +17,67 @@ function unicycle!(dx, x, u, t)
     return nothing
 end
 
+function state_to_posvel(x)
 
-function state_to_posvel(x, case::Case)
-    # Switch/case over all possible cases of Case
-    if case == Platooning
-        p1 = 0.0 # Leading agent is the reference position
-        v1 = x[1] + v_ref[1]
-        l1 = x[2] + l_ref[1] # normal lane
-        p2 = x[3] + p1 - d_ref
-        v2 = x[4] + v1
-        l2 = x[5] + l_ref[1] # normal lane
-    elseif case == BeginOvertake
-        # TODO
-        p1 = 0.0 # Leading agent is the reference position
-        v1 = x[1] + v_ref
-        l1 = x[2] + 0.0 # assuming lref = 0
-        p2 = x[3] + p1 - d_ref
-        v2 = x[4] + v1
-        l2 = x[5] + 0.0 # assuming lref = 0
-    elseif case == PerformOvertake
-        # TODO 
-        p1 = 0.0 # Leading agent is the reference position
-        v1 = x[1] + v_ref
-        l1 = x[2] + 0.0 # assuming lref = 0
-        p2 = x[3] + p1 - d_ref
-        v2 = x[4] + v1
-        l2 = x[5] + 0.0 # assuming lref = 0
-
-    elseif case == CompleteOvertake
-        # TODO
-        p1 = 0.0 # Leading agent is the reference position
-        v1 = x[1] + v_ref
-        l1 = x[2] + 0.0 # assuming lref = 0
-        p2 = x[3] + p1 - d_ref
-        v2 = x[4] + v1
-        l2 = x[5] + 0.0 # assuming lref = 0
-
-    elseif case == NormalOperation
-        # TODO
-        p1 = 0.0 # Leading agent is the reference position
-        v1 = x[1] + v_ref
-        l1 = x[2] + 0.0 # assuming lref = 0
-        p2 = x[3] + p1 - d_ref
-        v2 = x[4] + v1
-        l2 = x[5] + 0.0 # assuming lref = 0
-
-    else
-        error("Unknown control_case")
-    end
+    p1 = 0.0 # Leading agent is the reference position
+    v1 = x[1]
+    l1 = x[2]
+    p2 = x[3] + p1
+    v2 = x[4]
+    l2 = x[5]
     posvel = [p1, v1, l1, p2, v2, l2]
     return posvel
 end
 
-function posvel_to_state(posvel, case)
+
+function posvel_to_state(posvel, case, v_ref, l_ref, d_ref)
     #posvel = (pos_1, vel_1, lat_pos_1, pos_2, vel_2, lat_pos_2)
-    if case == Platooning
-        # 1) v1 - v_ref_1
-        # 2) l1 - lref (lateral position)
-        # 3) p2 - p1 + d_ref (longitudinal pos)
-        # 4) v2 - v1   /// The second car ignores its reference velocity and just follows the leading vehicle
-        # 5) l2 - lref
-        x = zeros(5)
-        x[1] = posvel[2] - v_ref[1]
-        x[2] = posvel[3] - l_ref[1] # normal lane
-        x[3] = posvel[4] - posvel[1] + d_ref
-        x[4] = posvel[5] - posvel[2]
-        x[5] = posvel[6] - l_ref[1] # normal lane
-    elseif case == BeginOvertake
-        # Placeholder for BeginOvertake
-    elseif case == PerformOvertake
-        # Placeholder for PerformOvertake
-    elseif case == CompleteOvertake
-        # Placeholder for CompleteOvertake
-    elseif case == NormalOperation
-        # Placeholder for NormalOperation
-    else
-        error("posvel_to_state not implemented for this control_case")
-    end
+    x = zeros(5)
+    x[1] = posvel[2]
+    x[2] = posvel[3]
+    x[3] = posvel[4] - posvel[1]
+    x[4] = posvel[5]
+    x[5] = posvel[6]
     return x
 end
 
+function choose_controller(posvel, vref, dref, lref, tol, current_case)
+    #posvel = (pos_1, vel_1, lat_pos_1, pos_2, vel_2, lat_pos_2)
+    p1 = posvel[1]
+    p2 = posvel[4]
+    v1 = posvel[2]
+    v2 = posvel[5]
+    l1 = posvel[3]
+    l2 = posvel[6]
+    if (current_case == Platooning)
+        # if close enough and agent behind wants to go faster, start overtake
+        if (p1 - p2 <= dref[Int(current_case)] + tol) && (vref[2] > v2)
+            case = BeginOvertake
+            println("Switching from Platooning to BeginOvertake")
+        else
+            case = Platooning
+        end
+    elseif current_case == BeginOvertake
+        if (p1 - p2 <= dref[Int(current_case)] + tol) && (l1 - l2 >= 0.6 * (lref[1] - lref[2]))
+            case = PerformOvertake
+            println("Switching from BeginOvertake to PerformOvertake")
+        else
+            case = BeginOvertake
+        end
+    elseif current_case == PerformOvertake
+        if (p1 - p2 <= dref[Int(current_case)] + tol)
+            # case = CompleteOvertake
+            println("Switching from PerformOvertake to CompleteOvertake")
+            case = CompleteOvertake
+        else
+            case = PerformOvertake
+        end
+    elseif current_case == CompleteOvertake
+        # TODO
+        case = CompleteOvertake
+    end
+    return case
+end
 ### Plotting utilities ###
 
 function compute_normal_tangent(x, y)

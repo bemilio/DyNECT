@@ -1,3 +1,57 @@
+
+@doc raw"""
+DyNEP
+
+Dynamic Nash Equilibrium Problem (DyNEP) structure.
+The linear dynamics are given by the equation:
+```math
+    x^+ = A x + \sum_i(B_i u_i) + c
+```
+The objective for agent i is 
+```math
+    J_i = \|x[T]\|^2_{P_i} + \sum_t \left\{\frac{1}{2}\|x[t]\|^2_{Q_i} + \frac{1}{2}\|u_i[t]\|^2_{R_{ii}} + 
+    \sum_{j\neq i}\left(\langle u_i[t], R_{ij}u_j[t]\rangle\right) + \langle x[t], q_t\rangle + \langle u_i[t], r_i\rangle \right\}
+``` 
+# Constructor
+`DyNEP(;
+    A::Matrix{Float64},
+    Bvec::Vector{Matrix{Float64}},
+    c::Vector{Float64},
+    Q::Vector{Matrix{Float64}},
+    R::Vector{Vector{Matrix{Float64}}}
+    P::Union{Nothing,Vector{Matrix{Float64}}}=nothing,
+    q::Vector{Vector{Float64}},
+    r::Vector{Vector{Float64}},
+    C_x::Matrix{Float64},
+    b_x::Vector{Float64},
+    C_loc_vec::Vector{Matrix{Float64}},
+    b_loc_vec::Vector{Vector{Float64}},
+    C_u_vec::Vector{Matrix{Float64}},
+    b_u::Vector{Float64}
+    )`
+# Fields
+- `nx::Int64`: Number of states.
+- `nu::Vector{Int64}`: Number of inputs per agent.
+- `N::Int64`: Number of agents.
+- `A::Matrix{Float64}`: State transition matrix.
+- `B::Matrix{Float64}`: Input matrix (horizontally concatenated for all agents).
+- `Bi::Vector{SubArray{Float64,2}}`: Views on `B` for each agent.
+- `Q::Vector{Matrix{Float64}}`: State cost matrices for each agent, size nₓ×nₓ.
+- `R::Vector{Vector{Matrix{Float64}}}`: Input cost matrix, the i,j-th element is size nᵤⁱ×nᵤʲ.
+- `P::Vector{Matrix{Float64}}`: Terminal cost matrices for each agent, size nₓ×nₓ.
+- `C_x::Matrix{Float64}`: State constraint matrix, size mₓ×nₓ.
+- `b_x::Vector{Float64}`: State constraint bounds, vector size mₓ.
+- `m_x::Int64`: Number of state constraints.
+- `C_loc::Matrix{Float64}`: Local input constraint matrix (block diagonal), size (∑mᵤⁱ)×(∑nᵤⁱ) .
+- `b_loc::Vector{Float64}`: Local input constraint bounds, vector size ∑mᵤⁱ
+- `C_loc_i::Vector{SubArray{Float64,2}}`: Views on `C_loc` for each agent, each size mᵤⁱ×nᵤⁱ
+- `b_loc_i::Vector{SubArray{Float64,1}}`: Views on `b_loc` for each agent, eqch vector size mᵤⁱ
+- `m_loc::Vector{Int64}`: Number of local constraints per agent.
+- `C_u::Matrix{Float64}`: Shared input constraint matrix: size mˢʰ⨯(∑nᵤⁱ).
+- `b_u::Vector{Float64}`: Shared input constraint bounds, vector size mˢʰ.
+- `C_u_i::Vector{SubArray{Float64,2}}`: Views on `C_u` for each agent, each size mˢʰ⨯nᵤⁱ
+- `m_u::Int64`: Number of shared input constraints.
+"""
 struct DyNEP # Dynamic Nash equilibrium problem
     nx::Int64
     nu::Vector{Int64}
@@ -6,9 +60,14 @@ struct DyNEP # Dynamic Nash equilibrium problem
     A::Matrix{Float64}
     B::Matrix{Float64} # B = [Bi[1], Bi[2], ...]
     Bi::Vector{SubArray{Float64,2}} # Views on B
+    c::Vector{Float64}
     Q::Vector{Matrix{Float64}}
-    R::Vector{Matrix{Float64}}
+    R::Vector{Vector{Matrix{Float64}}}
     P::Vector{Matrix{Float64}}
+    q::Vector{Vector{Float64}}
+    r::Vector{Vector{Float64}}
+    p::Vector{Vector{Float64}}
+
     ## Constraints
     # State constraints in the form C_ux*x <= b_x
     C_x::Matrix{Float64}
@@ -29,9 +88,13 @@ struct DyNEP # Dynamic Nash equilibrium problem
     function DyNEP(;
         A::Matrix{Float64},
         Bvec::Vector{Matrix{Float64}},
+        c::Union{Nothing,Vector{Float64}}=nothing, # Defaults to 0
         Q::Vector{Matrix{Float64}},
-        R::Vector{Matrix{Float64}},
-        P::Union{Nothing,Vector{Matrix{Float64}}}=nothing,
+        R::Vector{Vector{Matrix{Float64}}},
+        P::Union{Nothing,Vector{Matrix{Float64}}}=nothing, # Defaults to 0
+        q::Union{Nothing,Vector{Vector{Float64}}}=nothing, # Defaults to 0
+        r::Union{Nothing,Vector{Vector{Float64}}}=nothing, #Defaults to 0
+        p::Union{Nothing,Vector{Vector{Float64}}}=nothing, #Defaults to 0
         C_x::Matrix{Float64},
         b_x::Vector{Float64},
         C_loc_vec::Vector{Matrix{Float64}},
@@ -40,11 +103,65 @@ struct DyNEP # Dynamic Nash equilibrium problem
         b_u::Vector{Float64}
     )
 
-        B = hcat(Bvec...)
+        ## Extract sizes
         nx = size(A, 1)
         nu = map(x -> size(x, 2), Bvec)
         N = length(Bvec)
+        m_x = size(C_x, 1)
+        m_loc = map(x -> size(x, 1), C_loc_vec)
+
+        ## Dimensionality checks
+        @assert size(A, 1) == size(A, 2) "A must be square (nx × nx)"
+        @assert all(size(B_i, 1) == nx for B_i in Bvec) "Each matrix B_i in Bvec must have nx rows"
+        @assert length(Q) == N "Q must have one matrix per agent"
+        @assert all(size(Qi, 1) == nx && size(Qi, 2) == nx for Qi in Q) "Each Q[i] must be nx × nx"
+        @assert length(R) == N "R must be a N-long list of N matrices, where N is the # of agents (one weight R[i][j] for each agent i,j)"
+        @assert all(length(Ri) == N for Ri in R) "Each R[i] must be a list of length N (one weight R[i][j] for each agent i,j)"
+        @assert all(size(R[i][j], 1) == nu[i] && size(R[i][j], 2) == nu[j] for i in 1:N for j in 1:N) "Each R[i][j] must be nu[i] × nu[j]"
+        if !isnothing(P)
+            @assert length(P) == N "P must have one matrix per agent"
+            @assert all(size(Pi, 1) == nx && size(Pi, 2) == nx for Pi in P) "Each P[i] must be nx × nx"
+        else
+            P = [zeros(nx, nx) for _ in 1:N]
+        end
+        @assert size(C_x, 2) == nx "C_x must have nx columns"
+        @assert size(C_x, 1) == length(b_x) "Number of C_x rows must match length of b_x"
+        @assert length(C_loc_vec) == N "C_loc_vec must have one matrix per agent"
+        @assert length(b_loc_vec) == N "b_loc_vec must have one vector per agent"
+        @assert all(size(C_loc_vec[i], 2) == nu[i] for i in 1:length(Bvec)) "Each C_loc_vec[i] must have nu[i] columns"
+        @assert all(size(C_loc_vec[i], 1) == length(b_loc_vec[i]) for i in 1:length(Bvec)) "Each C_loc_vec[i] rows must match length of b_loc_vec[i]"
+        @assert length(C_u_vec) == N "C_u_vec must have one matrix per agent"
+        @assert all(size(C_u_vec[i], 2) == nu[i] for i in 1:length(Bvec)) "Each C_u_vec[i] must have nu[i] columns"
+        @assert size(b_u, 1) == size(C_u_vec[1], 1) "b_u length must match number of shared input constraints (rows of C_u_vec[1])"
+        @assert all(size(C_u_vec[i], 1) == size(C_u_vec[1], 1) for i in 1:N) "All C_u_vec[i] must have the same number of rows"
+        if !isnothing(c)
+            @assert length(c) == nx "c must have length nx"
+        else
+            c = zeros(nx)
+        end
+        if !isnothing(q)
+            @assert length(q) == N "q must have one vector per agent"
+            @assert all(length(qi) == nx for qi in q) "Each q[i] must have length nx"
+        else
+            q = [zeros(nx) for _ in 1:N]
+        end
+        if !isnothing(r)
+            @assert length(r) == N "r must have one vector per agent"
+            @assert all(length(ri) == nu[i] for (i, ri) in enumerate(r)) "Each r[i] must have length nu[i]"
+        else
+            r = [zeros(nu[i]) for i in 1:N]
+        end
+        if !isnothing(p)
+            @assert length(p) == N "p must have one vector per agent"
+            @assert all(length(pi) == nx for pi in p) "Each p[i] must have length nx"
+        else
+            p = [zeros(nx) for _ in 1:N]
+        end
+
+        ## Construct matrices
+
         # Create Bi as views on B
+        B = hcat(Bvec...)
         Bi = Vector{SubArray}(undef, N)
         start_col = 1
         for i in 1:N
@@ -54,12 +171,8 @@ struct DyNEP # Dynamic Nash equilibrium problem
         end
 
         ## Constraints
-
-        m_x = size(C_x, 1)
-
         C_loc = Matrix(BlockDiagonal(C_loc_vec))
         b_loc = vcat(b_loc_vec...)
-        m_loc = map(x -> size(x, 1), C_loc_vec)
         # Create C_loc_i, b_loc_i as views on C_loc, b_loc
         start_row = 1
         start_col = 1
@@ -76,6 +189,7 @@ struct DyNEP # Dynamic Nash equilibrium problem
 
         C_u = hcat(C_u_vec...)
         m_u = size(C_u, 1)
+
         # Create C_u_i as views on C_u
         start_col = 1
         C_u_i = Vector{SubArray}(undef, N)
@@ -84,11 +198,7 @@ struct DyNEP # Dynamic Nash equilibrium problem
             C_u_i[i] = @view C_u[:, start_col:start_col+n_cols-1]
         end
 
-        if isnothing(P)
-            P = [zeros(nx, nx) for _ in 1:N]
-        end
-
-        new(nx, nu, N, A, B, Bi, Q, R, P, C_x, b_x, m_x, C_loc, b_loc, C_loc_i, b_loc_i, m_loc, C_u, b_u, C_u_i, m_u)
+        new(nx, nu, N, A, B, Bi, c, Q, R, P, q, r, p, C_x, b_x, m_x, C_loc, b_loc, C_loc_i, b_loc_i, m_loc, C_u, b_u, C_u_i, m_u)
     end
 end
 

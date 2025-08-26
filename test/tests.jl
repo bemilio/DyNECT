@@ -2,8 +2,14 @@ using DyNECT
 using Test
 using LinearAlgebra
 using ParametricDAQP
+using BlockArrays
+using MatrixEquations
+
 
 @testset "generate_prediction_model.jl" begin
+    using Random
+    Random.seed!(1)
+
     nx = 3
     N = 3
     nu = [2, 3, 4]
@@ -19,6 +25,9 @@ using ParametricDAQP
 end
 
 @testset "generate_mpVI.jl" begin
+    using Random
+    Random.seed!(1)
+
     nx = 3
     N = 3
     nu = [2, 3, 4]
@@ -29,7 +38,12 @@ end
 
     Q = [rand(nx, nx) for _ in 1:N]
     P = [rand(nx, nx) for _ in 1:N]
-    R = [100 * Matrix{Float64}(I, nu[j], nu[j]) for j in 1:N]
+    # Define R_i with only non-zero element (i,i)
+    R = [[zeros(nu[i], nu[j]) for j in 1:N] for i in 1:N]
+    for i in 1:N
+        R[i][i] .= 100.0 * I(nu[i])
+    end
+
     # Constraints
     mx = 2
     C_x = rand(mx, nx)
@@ -61,8 +75,11 @@ end
 end
 
 @testset "infinite_horizon_OLNE.jl" begin
+    using Random
+    Random.seed!(1)
+
     nx = 3
-    N = 2
+    N = 3
     nu = [2, 3, 4]
     T_hor = 2
 
@@ -70,10 +87,15 @@ end
     Bvec = [rand(nx, nu[j]) for j in 1:N]
     Q = Vector{Matrix{Float64}}(undef, N)
     for i = 1:N
-        Q[i] = rand(nx, nx)
+        Q[i] = 0.1 * rand(nx, nx) + Matrix{Float64}(I(nx))
         Q[i] = Q[i] + Q[i]'
     end
-    R = [10 * Matrix{Float64}(I, nu[j], nu[j]) for j in 1:N]
+    # Define R_i with only non-zero element (i,i)
+    R = [[zeros(nu[i], nu[j]) for j in 1:N] for i in 1:N]
+    for i in 1:N
+        R[i][i] .= Matrix{Float64}(1.0 * I(nu[i]))
+    end
+
     # No Constraints
     C_x = zeros(0, nx)
     b_x = zeros(0)
@@ -122,4 +144,53 @@ end
     end
 
     @test norm(u_inf - u) < 1e-5
+end
+
+@testset "LQR_problem.jl" begin
+    using Random
+    Random.seed!(1)
+
+    # Solve single-agent LQR and compare it to the Riccati solution
+    nx = 4
+    N = 1
+    nu = [3]
+    T_hor = 4
+
+    A = rand(nx, nx)
+    B = [rand(nx, nu[1])]
+
+    Q = [Matrix{Float64}(I(nx))]
+    R = [[Matrix{Float64}(I(nu[1]))]]
+    P, _, K = ared(A, B[1], R[1][1], Q[1], zeros(nx, nu[1]))
+    P_vec = [P]
+
+    # Constraints
+    C_x = zeros(0, nx)
+    b_x = zeros(0)
+
+    C_loc_vec = [zeros(0, nu[1])]
+    b_loc_vec = [zeros(0)]
+
+    C_u_vec = [zeros(0, nu[1])]
+    b_u = zeros(0)
+
+    prob = DyNEP(
+        A=A,
+        Bvec=B,
+        Q=Q,
+        R=R,
+        P=P_vec,
+        C_x=C_x,
+        b_x=b_x,
+        C_loc_vec=C_loc_vec,
+        b_loc_vec=b_loc_vec,
+        C_u_vec=C_u_vec,
+        b_u=b_u)
+
+    mpVI = generate_mpVI(prob, T_hor)
+    x = rand(nx)
+    u_avi_all, _ = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x; 1], mpVI.A, mpVI.B' * [x; 1])
+    u_avi = DyNECT.first_input_of_sequence(u_avi_all, nu, N, T_hor)
+    u_lqr = -K * x
+    @test norm(u_lqr - u_avi[1]) < 1e-5
 end
