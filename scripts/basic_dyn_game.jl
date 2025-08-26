@@ -193,7 +193,7 @@ for i in 1:100
     ind = find_CR(x0_test, sol) # Find  CR corresponding to x0_test
     # Extract primal solution
     if !isnothing(ind)
-        usol = sol.CRs[ind].z' * [x0_test; 1]
+        usol = evaluate_solution(sol, x0_test)
     end
     uref, _ = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x0_test; 1], mpVI.A, mpVI.B' * [x0_test; 1], tol=tol)
     if isnothing(ind) && !isnothing(uref)
@@ -208,6 +208,8 @@ for i in 1:100
     end
     if !isnothing(ind) && !isnothing(uref) && norm(uref - usol) > tol
         @warn "Explicit and implicit solutions are different"
+        diff = norm(uref - usol)
+        println("Difference explicit-implicit solution = $diff")
     end
     if !isnothing(ind) && !isnothing(uref) && norm(uref - usol) <= tol
         println("Explicit and implicit solutions are equal")
@@ -241,7 +243,7 @@ for t in 1:T_sim-1
     x_exp[t+1] = game.A * x_exp[t] + game.B * u_exp[t]
 end
 diff = norm(x_exp - x_imp)
-println("Difference explicit-implicit MPC trajectory = $diff")
+println("Difference full explicit-implicit state trajectory = $diff")
 
 
 ## Plot 
