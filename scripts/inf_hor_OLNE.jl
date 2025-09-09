@@ -55,7 +55,7 @@ end
 
 # Generate and solve mpVI
 mpVI = generate_mpVI(prob, T_hor)
-useq, _ = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x; 1], mpVI.A, mpVI.B' * [x; 1])
+useq, _, solved_implicit = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x; 1], mpVI.A, mpVI.B' * [x; 1])
 solution_found = !isnothing(useq)
 if solution_found
     u = vcat(DyNECT.first_input_of_sequence(useq, prob.nu, prob.N, T_hor)...)

@@ -5,6 +5,7 @@ using ParametricDAQP
 using LinearAlgebra
 using Pkg
 using Infiltrator
+using BenchmarkTools
 Pkg.precompile()
 
 T_hor = 5
@@ -52,9 +53,7 @@ P, K = DyNECT.solveOLNE(game)
 game.P[:] = P[:]
 
 mpVI = generate_mpVI(game, T_hor)
-@time begin
-    sol, _ = ParametricDAQP.mpsolve(mpVI, Θ)
-end
+sol, _ = ParametricDAQP.mpsolve(mpVI, Θ)
 
 ## Test solution
 tol = 10^(-5)
@@ -74,21 +73,21 @@ for i in 1:100
     #     usol = CR.z' * [θ_normalized; 1]
     # end
     # @infiltrate
-    uref, res = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x0_test; 1], mpVI.A, mpVI.B' * [x0_test; 1], tol=tol)
-    if isnothing(usol) && !isnothing(uref)
+    uref, res, solved_implicit = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x0_test; 1], mpVI.A, mpVI.B' * [x0_test; 1], tol=tol)
+    if isnothing(usol) && solved_implicit
         @warn "The explicit solution is infeasible, while the implicit solution is feasible"
         println("Residual implicit = $res")
         println("x0 = $x0_test")
         global all_good = false
     end
-    if !isnothing(usol) && isnothing(uref)
+    if !isnothing(usol) && !solved_implicit
         @warn "The Implicit solution is infeasible, while the Explicit solution is feasible"
         global all_good = false
     end
-    if isnothing(usol) && isnothing(uref)
+    if isnothing(usol) && !solved_implicit
         println("Both explicit and implicit solution are infeasible")
     end
-    if !isnothing(usol) && !isnothing(uref) && norm(uref - usol) > tol
+    if !isnothing(usol) && solved_implicit && norm(uref - usol) > tol
         @warn "Explicit and implicit solutions are different"
         global all_good = false
     end

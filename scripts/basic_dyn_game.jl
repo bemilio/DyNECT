@@ -195,21 +195,21 @@ for i in 1:100
     if !isnothing(ind)
         usol = sol.CRs[ind].z' * [x0_test; 1]
     end
-    uref, _ = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x0_test; 1], mpVI.A, mpVI.B' * [x0_test; 1], tol=tol)
-    if isnothing(ind) && !isnothing(uref)
+    uref, _, solved_implicit = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x0_test; 1], mpVI.A, mpVI.B' * [x0_test; 1], tol=tol)
+    if isnothing(ind) && solved_implicit
         println("pause...")
         @warn "The explicit solution is infeasible, while the implicit solution is feasible"
     end
-    if !isnothing(ind) && isnothing(uref)
+    if !isnothing(ind) && !solved_implicit
         @warn "The Implicit solution is infeasible, while the Explicit solution is feasible"
     end
-    if isnothing(ind) && isnothing(uref)
+    if isnothing(ind) && !solved_implicit
         println("Both explicit and implicit solution are infeasible")
     end
-    if !isnothing(ind) && !isnothing(uref) && norm(uref - usol) > tol
+    if !isnothing(ind) && solved_implicit && norm(uref - usol) > tol
         @warn "Explicit and implicit solutions are different"
     end
-    if !isnothing(ind) && !isnothing(uref) && norm(uref - usol) <= tol
+    if !isnothing(ind) && solved_implicit && norm(uref - usol) <= tol
         println("Explicit and implicit solutions are equal")
     end
 end
