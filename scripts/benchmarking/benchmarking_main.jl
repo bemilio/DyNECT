@@ -33,6 +33,22 @@ function move_into_set(Θ, x)
     return x
 end
 
+function compute_residual(pVI::MPVI, param, u)
+    M = pVI.H
+    q = pVI.F' * [param; 1.0]
+    A = pVI.A
+    b = pVI.B' * [param; 1.0]
+    y = u - (M * u + q)
+    proj = DAQP.Model()
+    n = size(M, 1)
+    m = size(A, 1)
+    eye = Matrix{Float64}(I, n, n)
+    DAQP.setup(proj, eye, -y, A, b, Float64[], zeros(Cint, m))
+    u_transf, _, _, _ = DAQP.solve(proj)
+    r = norm(u - u_transf)
+    return r
+end
+
 function make_random_prob(nx::Int, N::Int, nu::Vector{Int}, mx::Int, mu::Vector{Int}, T_hor::Int)
     A = randn(nx, nx)
     Bvec = [randn(nx, nu[i]) for i in 1:N]
@@ -100,10 +116,13 @@ function benchmark_once(nx::Int, N::Int, nu::Vector{Int}, mx::Int, mu::Vector{In
 
     println("Building explicit solution...")
     opts = ParametricDAQP.Settings()
-    opts.early_stop = false
+    opts.early_stop = true
     t0 = time_ns()
-    sol, _ = ParametricDAQP.mpsolve(mpVI, Theta; opts)
-    if isempty(sol.CRs)
+    sol, info = ParametricDAQP.mpsolve(mpVI, Theta; opts)
+    status_explicit_solver = info.status
+    num_crs = info.nCR
+    t_explicit_build = info.solve_time
+    if status_explicit_solver == :Infeasible
         @warn("Explicit solver failed")
         serialize("failed_mpVI.jls", mpVI)
         serialize("failed_Theta.jls", Theta)
@@ -114,35 +133,44 @@ function benchmark_once(nx::Int, N::Int, nu::Vector{Int}, mx::Int, mu::Vector{In
             diffs_exp_imp=nothing,
             explicit_solved=nothing,
             implicit_solved=nothing,
-            num_crs=nothing
+            num_crs=nothing,
+            status_explicit_solver=nothing,
+            status_implicit_solver=nothing,
+            explicit_residual=nothing,
+            implicit_residual=nothing
         )
     end
-    t_explicit_build = (time_ns() - t0) / 1e9
-    num_crs = length(sol.CRs)
-    println("Explicit solution built in $(t_explicit_build) seconds with $(num_crs) critical regions.")
+    println("Explicit solution built in $(info.solve_time) seconds with $(info.nCR) critical regions.")
     println("Evaluating explicit solution for each query...")
     explicit_solutions = Vector{Any}(undef, n_queries)
     explicit_eval_times = zeros(n_queries)
-    explicit_solved = Vector{Bool}(undef, n_queries)
+    explicit_query_feasible = Vector{Bool}(undef, n_queries)
+    explicit_residual = zeros(n_queries)
+    t1 = 0.
+    t2 = 0.
     for (i, x) in enumerate(xs)
         if i % 20 == 0
             println("Explicit evaluation for query $(i)/$n_queries")
         end
-        t1 = time_ns()
         try
+            t1 = time_ns()
             explicit_solutions[i] = evaluate_solution(sol, x)
+            t2 = time_ns()
+            if isnothing(explicit_solutions[i])
+                explicit_query_feasible[i] = false
+                explicit_eval_times[i] = NaN
+                explicit_residual[i] = NaN
+            else
+                explicit_query_feasible[i] = true
+                explicit_eval_times[i] = (t2 - t1) / 1e9
+                explicit_residual[i] = compute_residual(mpVI, x, explicit_solutions[i])
+            end
         catch e
             @warn "Error during explicit evaluation" exception = (e, catch_backtrace())
             explicit_solutions[i] = nothing
-            explicit_solved[i] = false
+            explicit_query_feasible[i] = false
             explicit_eval_times[i] = NaN
-        end
-        if isnothing(explicit_solutions[i])
-            explicit_solved[i] = false
-            explicit_eval_times[i] = NaN
-        else
-            explicit_solved[i] = true
-            explicit_eval_times[i] = (time_ns() - t1) / 1e9
+            explicit_residual[i] = NaN
         end
     end
     println("Explicit evaluation done.")
@@ -150,14 +178,16 @@ function benchmark_once(nx::Int, N::Int, nu::Vector{Int}, mx::Int, mu::Vector{In
     println("Solving implicitly for each query (AVIsolve)...")
     implicit_solutions = Vector{Any}(undef, n_queries)
     implicit_eval_times = zeros(n_queries)
-    implicit_solved = Vector{Bool}(undef, n_queries)
+    implicit_query_feasible = Vector{Bool}(undef, n_queries)
+    implicit_residual = zeros(n_queries)
+    status_implicit_solver = Vector{Symbol}(undef, n_queries)
     for (i, x) in enumerate(xs)
         if i % 20 == 0
             println("  Implicit solve for query $(i)/$n_queries")
         end
-        t1 = time_ns()
         try
-            implicit_solutions[i], _, implicit_solved[i] = ParametricDAQP.AVIsolve(
+            t1 = time_ns()
+            implicit_solutions[i], implicit_residual[i], status_implicit_solver[i] = ParametricDAQP.AVIsolve(
                 mpVI.H,
                 mpVI.F' * [x; 1.0],
                 mpVI.A,
@@ -167,13 +197,19 @@ function benchmark_once(nx::Int, N::Int, nu::Vector{Int}, mx::Int, mu::Vector{In
                 stepsize=0.5,
                 tol=1e-4
             )
+            t2 = time_ns()
+            implicit_query_feasible[i] = (status_implicit_solver[i] != :Infeasible)
+            implicit_eval_times[i] = (status_implicit_solver[i] != :Infeasible) ? (t2 - t1) / 1e9 : NaN
         catch e
             @warn "Error during implicit solve" exception = (e, catch_backtrace())
             implicit_solutions[i] = nothing
-            implicit_solved[i] = false
+            implicit_query_feasible[i] = false
             implicit_eval_times[i] = NaN
+            implicit_residual[i] = NaN
+            status_implicit_solver[i] = :Error
+            continue
         end
-        implicit_eval_times[i] = implicit_solved[i] ? (time_ns() - t1) / 1e9 : NaN
+
     end
     println("Implicit solves done.")
 
@@ -195,15 +231,18 @@ function benchmark_once(nx::Int, N::Int, nu::Vector{Int}, mx::Int, mu::Vector{In
             push!(diffs_exp_imp, NaN)
         end
     end
-
     return (
         t_explicit_build=t_explicit_build,
         explicit_eval_times=explicit_eval_times,
         implicit_eval_times=implicit_eval_times,
         diffs_exp_imp=diffs_exp_imp,
-        explicit_solved=explicit_solved,
-        implicit_solved=implicit_solved,
-        num_crs=num_crs
+        explicit_query_feasible=explicit_query_feasible,
+        implicit_query_feasible=implicit_query_feasible,
+        num_crs=num_crs,
+        status_explicit_solver=status_explicit_solver,
+        status_implicit_solver=status_implicit_solver,
+        explicit_residual=explicit_residual,
+        implicit_residual=implicit_residual
     )
 end
 
@@ -213,10 +252,14 @@ function run_benchmarks(; n_instances::Int, nx::Int, N::Int, nu::Vector{Int}, mx
             :explicit_eval_times,
             :implicit_eval_times,
             :diffs_exp_imp,
-            :explicit_solved,
-            :implicit_solved,
-            :num_crs),
-        Tuple{Float64,Vector{Float64},Vector{Float64},Vector{Float64},Vector{Bool},Vector{Bool},Int}}}(undef, n_instances)
+            :explicit_query_feasible,
+            :implicit_query_feasible,
+            :num_crs,
+            :status_explicit_solver,
+            :status_implicit_solver,
+            :explicit_residual,
+            :implicit_residual),
+        Tuple{Float64,Vector{Float64},Vector{Float64},Vector{Float64},Vector{Bool},Vector{Bool},Int,Symbol,Vector{Symbol},Vector{Float64},Vector{Float64}}}}(undef, n_instances)
     for i in 1:n_instances
         println("Benchmark instance $i / $n_instances")
         res = benchmark_once(nx, N, nu, mx, mu, T_hor; n_queries=n_queries)
@@ -232,20 +275,34 @@ function run_benchmarks(; n_instances::Int, nx::Int, N::Int, nu::Vector{Int}, mx
     explicit_evaluation_times = vcat([r.explicit_eval_times for r in results]...)
     implicit_solution_times = vcat([r.implicit_eval_times for r in results]...)
     diffs_exp_imp = vcat([r.diffs_exp_imp for r in results]...)
-    explicit_solved = vcat([r.explicit_solved for r in results]...)
-    implicit_solved = vcat([r.implicit_solved for r in results]...)
+    explicit_query_feasible = vcat([r.explicit_query_feasible for r in results]...)
+    implicit_query_feasible = vcat([r.implicit_query_feasible for r in results]...)
     num_crs = vcat([r.num_crs for r in results]...)
-    return build_explicit_times, explicit_evaluation_times, implicit_solution_times, diffs_exp_imp, explicit_solved, implicit_solved, num_crs
+    status_explicit_solver = vcat([r.status_explicit_solver for r in results]...)
+    status_implicit_solver = vcat([r.status_implicit_solver for r in results]...)
+    explicit_residual = vcat([r.explicit_residual for r in results]...)
+    implicit_residual = vcat([r.implicit_residual for r in results]...)
+    return build_explicit_times,
+    explicit_evaluation_times,
+    implicit_solution_times,
+    diffs_exp_imp,
+    explicit_query_feasible,
+    implicit_query_feasible,
+    num_crs,
+    status_explicit_solver,
+    status_implicit_solver,
+    explicit_residual,
+    implicit_residual
 end
 
 ############## SCRIPT BEGIN ###################
 
 # Define parameter grids
 
-T_hor_list = [2, 3, 4, 5]
-N_list = [2, 3, 4]
-nx_list = [2, 3, 4, 5]
-mx_list = [2, 3, 4]
+T_hor_list = [5, 4, 3, 2]
+N_list = [4, 3, 2]
+nx_list = [4, 3, 2]
+mx_list = [3, 2, 1]
 mu_list = [3]
 nu_list = [3]
 
@@ -261,9 +318,13 @@ results_df = DataFrame(
     explicit_evaluation_times=Vector{Float64}[],
     implicit_solution_times=Vector{Float64}[],
     diffs_exp_imp=Vector{Float64}[],
-    explicit_solved=Vector{Bool}[],
-    implicit_solved=Vector{Bool}[],
-    num_CRs=Vector{Int}[]
+    explicit_query_feasible=Vector{Bool}[],
+    implicit_query_feasible=Vector{Bool}[],
+    num_CRs=Vector{Int}[],
+    status_explicit_solver=Vector{Symbol}[],
+    status_implicit_solver=Vector{Symbol}[],
+    explicit_residual=Vector{Float64}[],
+    implicit_residual=Vector{Float64}[]
 )
 
 for T_hor in T_hor_list, N in N_list, nx in nx_list, nu_per_agent in nu_list, mx in mx_list, mu_per_agent in mu_list
@@ -274,9 +335,13 @@ for T_hor in T_hor_list, N in N_list, nx in nx_list, nu_per_agent in nu_list, mx
     explicit_evaluation_times,
     implicit_solution_times,
     diffs_exp_imp,
-    explicit_solved,
-    implicit_solved,
-    num_CRs = run_benchmarks(
+    explicit_query_feasible,
+    implicit_query_feasible,
+    num_CRs,
+    status_explicit_solver,
+    status_implicit_solver,
+    explicit_residual,
+    implicit_residual = run_benchmarks(
         n_instances=10,
         nx=nx,
         N=N,
@@ -297,9 +362,13 @@ for T_hor in T_hor_list, N in N_list, nx in nx_list, nu_per_agent in nu_list, mx
         explicit_evaluation_times,
         implicit_solution_times,
         diffs_exp_imp,
-        explicit_solved,
-        implicit_solved,
-        num_CRs
+        explicit_query_feasible,
+        implicit_query_feasible,
+        num_CRs,
+        status_explicit_solver,
+        status_implicit_solver,
+        explicit_residual,
+        implicit_residual
     ))
     println("\nBenchmark summary (times in seconds):")
     println("Explicit build time: mean=$(mean(build_explicit_times)), median=$(median(build_explicit_times)), std=$(std(build_explicit_times))")
@@ -309,8 +378,6 @@ for T_hor in T_hor_list, N in N_list, nx in nx_list, nu_per_agent in nu_list, mx
 
 end
 
-# Optionally, serialize the results_dict for later analysis
-@infiltrate
 open("results_df.jls", "w") do io
     serialize(io, results_df)
 end
