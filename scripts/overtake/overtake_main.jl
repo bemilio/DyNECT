@@ -17,7 +17,7 @@ include("overtake_utils.jl")
 solve_explicit = true
 solve_implicit = true
 
-T_hor = 2
+T_hor = 4
 Δt = 0.1 #sampling time
 v_ref = [20., 25.] # reference speed for each agent 
 v_min = 10.
@@ -37,7 +37,7 @@ l_ref = [0.5, -0.5] #reference lateral position for normal and overtake lane
 l_min = 0.5 # Safety lateral distance
 
 gain = 0. # Gain of pre-stabilizing controller. Can be 0.
-T_sim = 100
+T_sim = 300
 
 # Create vectors to hold 5 games and 5 mpVI objects
 games = Vector{DyNEP}(undef, length(instances(Case)))
@@ -94,8 +94,8 @@ for case in instances(Case)
         lb = vcat(v_min, 0., -d_ref[Int(PerformOvertake)] - tol, v_min, -1.)
         Theta[Int(case)] = (ub=ub, lb=lb)
     elseif case == NormalOperation
-        ub = vcat(v_max, 1., v_max, 1.)
-        lb = vcat(v_min, 0., v_min, 0.)
+        ub = vcat(v_max, 1., 100, v_max, 1.)
+        lb = vcat(v_min, 0., -d_ref[Int(CompleteOvertake)] - tol, v_min, 0.)
         Theta[Int(case)] = (ub=ub, lb=lb)
     end
 end
@@ -374,46 +374,22 @@ games[Int(CompleteOvertake)] = DyNEP(
 mpVIs[Int(CompleteOvertake)] = generate_mpVI(games[Int(CompleteOvertake)], T_hor)
 
 ## Case 5: Normal operation
-# States:
-# 1) v1
-# 2) l1 (lateral position)
-# 4) v2   
-# 5) l2
-#
-# Inputs:
-# 1) a1
-# 2) alpha1 (angle)
-# 3) a2 
-# 4) alpha2
-A_red = [1. 0 0 0;
-    0 1. 0 0;
-    0 0 1. 0;
-    0 0 0 1.]
-B = [[Δt 0;
-        0 Δt*v_ref[1];
-        0 0;
-        0 0],
-    [0 0;
-        0 0;
-        Δt 0;
-        0 Δt*v_ref[2]]]
-
+# Objectives
 # J₁ = ‖v₁ - vᵈᵉˢ₁‖² + ‖l₁ - lᵈᵉˢ₂‖²
 # J₂ = ‖v₂ - vᵈᵉˢ₂‖² + ‖l₂ - lᵈᵉˢ₂‖²
-
-
-Q = [Matrix{Float64}(Diagonal([1., 1., 0., 0.])),
-    Matrix{Float64}(Diagonal([0., 0., 1., 1.]))]
+Q = [Matrix{Float64}(Diagonal([1., 1., 0., 0., 0.])),
+    Matrix{Float64}(Diagonal([0., 0., 0., 1., 1.]))]
 R = [[Matrix{Float64}(Diagonal([5., 20.,])), zeros(2, 2)],
     [zeros(2, 2), Matrix{Float64}(Diagonal([5., 20.]))]]
-q = [[-v_ref[1]; -l_ref[1]; 0.; 0.],
-    [0.; 0.; -v_ref[2]; -l_ref[1]]]
+q = [[-v_ref[1]; -l_ref[1]; 0.; 0.; 0.],
+    [0.; 0.; 0.; -v_ref[2]; -l_ref[1]]]
 
 # Constraints 
-C_x = [1. 0 0 0; # top speed agent 1
-    -1. 0 0 0; # min speed agent 1
-    0. 0 1. 0; # top speed agent 2
-    0. 0 -1. 0] # min speed agent 2
+# Note: No safety distance
+C_x = [1. 0 0 0 0; # top speed agent 1
+    -1. 0 0 0 0; # min speed agent 1
+    0. 0 0 1. 0; # top speed agent 2
+    0. 0 0 -1. 0] # min speed agent 2
 
 b_x = [v_max
  - v_min
@@ -445,7 +421,7 @@ b_u = zeros(0)
 nx = size(A, 1)
 
 games[Int(NormalOperation)] = DyNEP(
-    A=A_red,
+    A=A,
     Bvec=B,
     Q=Q,
     R=R,
@@ -473,18 +449,22 @@ if (solve_implicit)
     pv_imp = zeros(6, T_sim)
     u_imp = zeros(4, T_sim)
     pv_imp[:, 1] = pv0
+    implicit_eval_times = zeros(T_sim - 1)
     local case = Platooning
     for t in 1:T_sim-1
         case = choose_controller(pv_imp[:, t], v_ref, d_ref, l_ref, tol, case)
         x = posvel_to_state(pv_imp[:, t], case, v_ref, l_ref, d_ref)
         mpVI = mpVIs[Int(case)]
-        useq, _ = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x; 1], mpVI.A, mpVI.B' * [x; 1])
+        t1 = time_ns()
+        useq, _, status_solver = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x; 1], mpVI.A, mpVI.B' * [x; 1])
+        t2 = time_ns()
+        implicit_eval_times[t] = (status_solver != :Infeasible) ? (t2 - t1) / 1e9 : NaN
         solution_found = !isnothing(useq)
-        game = games[Int(case)]
-        if solution_found
+        if status_solver == :Solved
+            game = games[Int(case)]
             u_imp[:, t] = vcat(DyNECT.first_input_of_sequence(useq, game.nu, game.N, T_hor)...)
         else
-            @warn "[Iterative VI solution] Infeasible problem: time = $t; controller case = $case"
+            @warn "[Iterative VI solution] Not solved: time = $t; controller case = $case; Solver status = $status_solver"
         end
         u_now = u_imp[:, t]
         # Evolve dynamic system
@@ -495,10 +475,11 @@ if (solve_implicit)
         pv_imp[1:3, t+1] = current_state(agent1)
         pv_imp[4:6, t+1] = current_state(agent2)
 
-        println("[t=$t] x= $x")
+        # println("[t=$t] x= $x")
         pv_now = pv_imp[:, t]
-        println("[t=$t] pv= $pv_now")
+        # println("[t=$t] pv= $pv_now")
     end
+    println("Maximum computation time iterative = $(maximum(implicit_eval_times))")
 end
 
 ## Simulation: Explicit MPC
@@ -517,14 +498,17 @@ if (solve_explicit)
     println("Simulating explicit controller...")
     agent1 = CoupledODEs(unicycle!, pv0[1:3], zeros(2)) #initialize system with zero input
     agent2 = CoupledODEs(unicycle!, pv0[4:6], zeros(2))
-
+    explicit_eval_times = zeros(T_sim - 1)
     u_exp = zeros(4, T_sim)
     local case = Platooning
     for t in 1:T_sim-1
         case = choose_controller(pv_exp[:, t], v_ref, d_ref, l_ref, tol, case)
         x = posvel_to_state(pv_exp[:, t], case, v_ref, l_ref, d_ref)
         # Extract primal solution
+        t1 = time_ns()
         u_seq = evaluate_solution(explicit_sol[Int(case)], x)
+        t2 = time_ns()
+        explicit_eval_times[t] = (!isnothing(u_seq)) ? (t2 - t1) / 1e9 : NaN
         if !isnothing(u_seq)
             u_exp[:, t] = vcat(DyNECT.first_input_of_sequence(u_seq, games[Int(case)].nu, games[Int(case)].N, T_hor)...)
         else
@@ -547,6 +531,7 @@ if solve_explicit && solve_implicit
     if diff > tol
         @warn("The explicit and the implicit solution appear to be different")
     end
+    println("Maximum evaluation time explicit = $(maximum(explicit_eval_times))")
     println("Difference explicit-implicit MPC trajectory = $diff")
 end
 
