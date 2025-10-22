@@ -22,7 +22,7 @@ function first_input_of_sequence(u::Vector{Float64}, nu::Vector{Int64}, N::Int64
     return u_first
 end
 
-function MPC_control(x0::Vector{Float64}, sol, nu::Vector{Int64}, N::Int64, T_hor::Int64)
+function MPC_control(x0::Vector{Float64}, sol::MPVI, nu::Vector{Int64}, N::Int64, T_hor::Int64)
     ind = find_CR(x0, sol)
     # Extract primal solution
     u = sol.CRs[ind].z' * [x0; 1]
