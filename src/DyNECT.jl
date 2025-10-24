@@ -1,6 +1,6 @@
 module DyNECT
 
-using LinearAlgebra
+using LinearAlgebra, ParametricDAQP, MatrixEquations, BlockDiagonals, BlockArrays
 
 export DyNEP, generate_mpVI
 

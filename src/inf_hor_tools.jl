@@ -1,5 +1,3 @@
-using MatrixEquations
-using BlockDiagonals
 @enum method STEIN = 1
 
 function solveOLNE(game::DyNEP; method=STEIN, max_iter=1000, stepsize=0.1)

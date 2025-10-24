@@ -1,4 +1,3 @@
-using ParametricDAQP # For the mpVI type
 
 function find_CR(x0::Vector{Float64}, sol; eps_gap=1e-5)
     #Find the critical region for x0

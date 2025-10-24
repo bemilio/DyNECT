@@ -1,7 +1,3 @@
-using ParametricDAQP # For the mpVI type
-using BlockArrays
-using BlockDiagonals
-
 @doc raw"""
     generate_mpVI(prob::DyNEP, T_hor::Int64)
     Constructs the parametric variational inequality (mpVI) for a dynamic Nash equilibrium problem (DyNEP) over a finite prediction horizon.
