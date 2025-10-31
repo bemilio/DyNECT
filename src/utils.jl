@@ -1,9 +1,9 @@
 @doc raw"""
-    generate_mpVI(prob::DyNEP, T_hor::Int64)
-    Constructs the parametric variational inequality (mpVI) for a dynamic Nash equilibrium problem (DyNEP) over a finite prediction horizon.
+    DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
+    Constructs the parametric variational inequality (mpVI) for a dynamic Nash equilibrium problem (DynLQGame) over a finite prediction horizon.
 
 # Arguments
-- `prob::DyNEP`: Dynamic game structure containing system dynamics, cost, and constraints.
+- `prob::DynLQGame`: Dynamic game structure containing system dynamics, cost, and constraints.
 - `T_hor::Int64`: Prediction horizon.
 
 # Returns
@@ -19,7 +19,7 @@ The VI is of the form:
 ``H u + F x_0 + f``,  subject to  ``D u \leq E x_0 + d``
 where ``u`` is the stacked input sequence for all agents.
 """
-function generate_mpVI(prob::DyNEP, T_hor::Int64)
+function DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
     # Matrices defined as in Baghdalhorani, Benenati, Grammatico - Arxiv 2025
 
     # prediction model: x̅ = Θx₀+(∑ Γᵢu̅ᵢ) + c̅
@@ -74,7 +74,7 @@ function generate_mpVI(prob::DyNEP, T_hor::Int64)
         kron(ones(T_hor), prob.b_x) - C̅_x * c̅    # State constraints
         vcat([kron(ones(T_hor), prob.b_loc_i[i]) for i in 1:prob.N]...)] # Local input constraints
     # VI(H*x + F*x0 + f, D*x <= E*x0 + d)
-    return ParametricDAQP.MPVI(Matrix(H), F, f, D, E, d)
+    return mpAVI(Matrix{Float64}(H), F, f, D, E, d)
 end
 
 @doc raw"""

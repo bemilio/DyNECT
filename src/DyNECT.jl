@@ -1,12 +1,22 @@
 module DyNECT
 
-using LinearAlgebra, ParametricDAQP, MatrixEquations, BlockDiagonals, BlockArrays
+# Basic dependencies
+using LinearAlgebra, SparseArrays, MatrixEquations, BlockDiagonals, BlockArrays, CommonSolve
 
-export DyNEP, generate_mpVI
+# External solvers
+using DAQP, Clarabel, JuMP, Monviso, ParametricDAQP
+
+
+# CommonSolve
 
 include("types.jl")
 include("utils.jl")
 include("inf_hor_tools.jl")
-include("interface_pDAQP.jl")
+include("interfaces.jl")
+
+using CommonSolve
+include("solvers.jl")
+export DynLQGame, DynLQGame2mpAVI
+export solve
 
 end
