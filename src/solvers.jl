@@ -209,46 +209,141 @@ end
 #TODO
 struct DGSQPSolver
     prob::AVI
+    x::AbstractVector{Float64}
+    λ::AbstractVector{Float64}
+    x_last::AbstractVector{Float64}
+    λ_last::AbstractVector{Float64}
+    iter::Ref{Int}
+    iter_last::Ref{Int}
+    merit_last::Ref{Float64}
+    merit::Function
+    use_relaxed_step::Ref{Bool}
+    qp::Clarabel.Solver
+    params::IterativeSolverParams
+    max_watchdog_iter::Int
+    max_safe_linesearch_iter::Int
+    status::Ref{Symbol}
 end
 
-function CommonSolve.init(prob::AVI, ::Type{DGSQPSolver}; params::IterativeSolverParams=IterativeSolverParams())
-    B = (prob.H + prob.H') / 2 + param.regularization * eye(prob.n)
-    qp = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
-    cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
-    h = zeros(n)
-    Clarabel.setup!(qp, B, h, A, prob.b, cone, settings)
-end
-
-function CommonSolve.step!(solver::DGSQPSolver)
-    # Compute projection operator
+function CommonSolve.init(prob::AVI, ::Type{DGSQPSolver}; max_watchdog_iter::Int=5, max_safe_linesearch_iter::Int=20, params::IterativeSolverParams=IterativeSolverParams())
+    regularization = 0.1
+    B = SparseMatrixCSC((prob.H + prob.H') / 2 + regularization * I(prob.n))
     qp = Clarabel.Solver()
     settings = Clarabel.Settings(verbose=false, presolve_enable=false)
     cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
     A = SparseMatrixCSC(prob.A)
-    Clarabel.setup!(proj, M1plusQ, M2x_plus_f, A, prob.b, cone, settings)
 
+    if params.warmstart == :NoWarmStart
+        x = zeros(prob.n)
+    elseif params.warmstart == :UnconstrainedSolution
+        x = -prob.H \ prob.f
+    else
+        @warn "[DGSQPSolver initialization] Requested warmstart not implemented."
+        x = zeros(prob.n)
+    end
+
+    Clarabel.setup!(qp, B, zeros(prob.n), A, prob.b, cone, settings)
+    merit = (x, λ, s, μ) -> 0.5 * norm(prob.H * x + prob.f + prob.A' * λ, 2)^2 + μ * norm(prob.A * x - prob.b - s, 1)
+    return DGSQPSolver(prob, x, zeros(prob.m), x, zeros(prob.m), Ref(0), Ref(0), Ref(Inf), merit, Ref(true), qp, params, max_watchdog_iter, max_safe_linesearch_iter, Ref(:Initialized))
 end
 
-function CommonSolve.solve!(solver::DGSQPSolver)
-    mul!(solver.h, solver.prob.H * solver.h)
-    Clarabel.update_q!(solver.qp, solver.h)
-    mul!(solver.C, prob.A, solver.x) # C(x) = Ax - b
-    solver.C .= solver.C .- solver.prob.b
-    solver.qp.update(q=solver.h, b=-solver.C)
+function CommonSolve.step!(solver::DGSQPSolver)
+    #Primal update: QP solution
+    h = solver.prob.H * solver.x + solver.prob.f
+    Clarabel.update_q!(solver.qp, h)
+    C = solver.prob.A * solver.x - solver.prob.b # C(x) = Ax - b
+    Clarabel.update_b!(solver.qp, -C)
     results = Clarabel.solve!(solver.qp)
-    solver.p_x[:] = results.x
+    p_x = results.x
     if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
-        solver.x = nothing
+        solver.x .= NaN .* ones(solver.prob.n)
         solver.status[] = :Infeasible
         return solver
     end
+    # Dual update
     d = results.z # Dual variable of the QP
-    solver.p_λ .= d .- solver.λ
-    solver.s .= min.(zeros(solver.prob.m), solver.C) # s = min(0, Ax - b - s)
-    solver.p_s .= solver.C .- solver.s
-    mul!(solver.p_s, solver.prob.A, solver.p_x, 1.0, 1.0) # p_s = Ap + Ax - b - s
-    #TODO: line search, understand what μ does
+    p_λ = d .- solver.λ
+    # Aux variable update
+    s = min.(zeros(solver.prob.m), C) # s = min(0, Ax - b - s)
+    p_s = solver.prob.A * p_x + C - s
+
+    # Watchdog line search
+    eps = 0.0001
+    if norm(C - s) > eps
+        ∇γ = [solver.prob.H' * (solver.prob.H * x + solver.prob.f + solver.prob.A'λ);
+            solver.prob.A * (solver.prob.H * x + solver.prob.f + solver.prob.A'λ)]
+        ρ = 0.5
+        μ = ∇γ' * [p_x; p_λ] / ((1 - ρ) * norm(C - s, 1))
+    else
+        μ = 0.
+    end
+    x_plus = zeros(solver.prob.n)
+    λ_plus = zeros(solver.prob.m)
+    merit_x_plus = 0.
+    if solver.use_relaxed_step[]
+        x_plus .= solver.x + p_x
+        λ_plus .= solver.λ + p_λ
+        s_plus = s + p_s
+        merit_x_plus = solver.merit(x_plus, λ_plus, s_plus, μ)
+    else
+        #safe line search
+        alpha = 1.0
+        for k in 1:solver.max_safe_linesearch_iter
+            x_plus .= solver.x + alpha * p_x
+            λ_plus .= solver.λ + alpha * p_λ
+            s_plus = s + alpha * p_s
+            merit_x_plus = solver.merit(x_plus, λ_plus, s_plus, μ)
+            merit_x = solver.merit(solver.x, solver.λ, s, μ)
+            if merit_x_plus <= merit_x
+                break
+            else
+                alpha .* 0.5
+            end
+        end
+    end
+    if merit_x_plus <= solver.merit_last[]
+        solver.x .= x_plus
+        solver.iter_last[] = solver.iter[]
+        solver.merit_last[] = merit_x_plus[]
+        solver.use_relaxed_step[] = true
+    else
+        solver.use_relaxed_step[] = false
+        if solver.iter[] - solver.iter_last[] >= solver.max_watchdog_iter
+            # reset to point of last decrease
+            solver.x .= solver.x_last
+            solver.λ .= solver.λ_last
+            solver.iter_last[] = solver.iter[]
+        end
+    end
+    solver.iter[] = solver.iter[] + 1
+end
+
+function CommonSolve.solve!(solver::DGSQPSolver)
+    res = Inf
+    for k in 1:solver.params.max_iter
+        CommonSolve.step!(solver)
+        if solver.status[] == :Infeasible
+            @warn "[DGSQPSolver::solve] Infeasibility detected"
+            break
+        end
+        if mod(k, 10) == 0
+            res = compute_residual(solver.prob, solver.x)
+            if solver.params.verbose
+                println("[DGSQPSolver] Residual = $res")
+            end
+            if res < solver.params.tol
+                solver.status[] = :Solved
+                break
+            end
+        end
+        if k == solver.params.max_iter
+            solver.status[] = :MaximumIterationsReached
+            @warn "[DGSQPSolver::solve] Maximum iterations reached, residual = $res"
+            break
+        end
+    end
+    solution = (x=solver.x, status=solver.status[], residual=res)
+    return solution
 end
 
 
