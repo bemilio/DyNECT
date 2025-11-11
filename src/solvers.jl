@@ -1,15 +1,5 @@
 ### AVI Solvers ###
 
-function compute_residual(prob::AVI, x::AbstractVector)
-    y = x - (prob.H * x + prob.f)
-    #TODO: Switch to Clarabel
-    proj = DAQP.Model()
-    DAQP.setup(proj, Matrix{Float64}(I, prob.n, prob.n), -y, prob.A, prob.b, Float64[], zeros(Cint, prob.m))
-    x_transf, _, _, _ = DAQP.solve(proj)
-    r = norm(x - x_transf)
-    return r
-end
-
 @doc raw"""
 Douglas Rachford algorithm for the affine variational inequality
 ```math
@@ -569,8 +559,8 @@ function CommonSolve.solve!(pDAQP::ParametricDAQPSolver)
     prob = ParametricDAQP.MPVI(pDAQP.mpAVI.H, pDAQP.mpAVI.F, pDAQP.mpAVI.f, pDAQP.mpAVI.A, pDAQP.mpAVI.B, pDAQP.mpAVI.b)
     n_θ = size(pDAQP.mpAVI.C, 2)
     Θ = (A=pDAQP.mpAVI.C', b=pDAQP.mpAVI.d, ub=pDAQP.mpAVI.ub, lb=pDAQP.mpAVI.lb)
-
-    ParametricDAQP.mpsolve(prob, Θ; opts=pDAQP.options)
+    (sol, info) = ParametricDAQP.mpsolve(prob, Θ; opts=pDAQP.options)
+    return sol
 end
 
 

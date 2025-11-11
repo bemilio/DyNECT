@@ -23,10 +23,18 @@ function first_input_of_sequence(u::Vector{Float64}, nu::Vector{Int64}, N::Int64
     return u_first
 end
 
-function MPC_control(x0::Vector{Float64}, sol::MPVI, nu::Vector{Int64}, N::Int64, T_hor::Int64)
-    ind = find_CR(x0, sol)
-    # Extract primal solution
-    u = sol.CRs[ind].z' * [x0; 1]
-    # Extract first input of each agent's sequence
+function evaluatePWA(sol::ParametricDAQP.Solution, θ::Vector{Float64})
+    θ_normalized = (θ - sol.translation) .* sol.scaling
+    all_CRs_indexes = find_CR(θ_normalized, sol)
+    if !isempty(all_CRs_indexes)
+        CR = sol.CRs[all_CRs_indexes[1]]
+        return CR.z' * [θ_normalized; 1]
+    else
+        return nothing
+    end
+end
+
+function MPC_control(sol::ParametricDAQP.Solution, x0::Vector{Float64}, nu::Vector{Int64}, N::Int64, T_hor::Int64)
+    u = evaluatePWA(sol::ParametricDAQP.Solution, x0::Vector{Float64})
     return first_input_of_sequence(u, nu, N, T_hor)
 end

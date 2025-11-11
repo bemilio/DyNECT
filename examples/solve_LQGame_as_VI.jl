@@ -3,6 +3,8 @@ using DyNECT
 using BlockDiagonals
 # using ParametricDAQP
 using LinearAlgebra
+using Random
+Random.seed!(1234)
 
 # using PythonCall
 # DGSQP = pyimport("DGSQP")
@@ -45,9 +47,8 @@ game = DynLQGame(
     b_u=b_u)
 
 # Set terminal objective as infinite-horizon value
-P, K = DyNECT.solveOLNE(game)
-game.P[:] = P[:]
-
+# P, K = DyNECT.solveOLNE(game)
+# game.P[:] = P[:]
 mpvi = DynLQGame2mpAVI(game, T_hor)
 
 # Example solve for specific initial condition
@@ -68,14 +69,16 @@ println("Solution residual monviso = $(monviso_sol.residual)")
 DR_sol = CommonSolve.solve(avi, DyNECT.DouglasRachford; params=params)
 println("Solution residual DR = $(DR_sol.residual)")
 
-
 # Solve multi-parametric problem
 # Range of initial states 
 nx = size(A, 1)
 mpvi.ub[:] = 5. * ones(nx)
 mpvi.lb[:] = -5. * ones(nx)
-CommonSolve.solve(mpvi, DyNECT.ParametricDAQPSolver)
+mpvi_sol = CommonSolve.solve(mpvi, DyNECT.ParametricDAQPSolver)
 
+pDAQP_sol = DyNECT.evaluatePWA(mpvi_sol, x0)
+pDAQP_res = DyNECT.compute_residual(avi, pDAQP_sol)
+println("Solution residual pDAQP (explicit) = $pDAQP_res")
 
 
 #TODO: Turn the comparison between multi-parametric solution and explicit solution into test
