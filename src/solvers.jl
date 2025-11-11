@@ -1,9 +1,5 @@
 ### AVI Solvers ###
 
-
-function AVIsolver_common_init()
-end
-
 function compute_residual(prob::AVI, x::AbstractVector)
     y = x - (prob.H * x + prob.f)
     #TODO: Switch to Clarabel
@@ -203,10 +199,7 @@ function CommonSolve.solve!(solver::MonvisoSolver)
     return solution
 end
 
-#### DynLQGame solvers ####
-
-# Compatibility layer with DGSQP
-#TODO
+# DGSQP
 struct DGSQPSolver
     prob::AVI
     x::AbstractVector{Float64}
@@ -347,6 +340,188 @@ function CommonSolve.solve!(solver::DGSQPSolver)
 end
 
 
+#### DynLQGame solvers ####
+
+# ADMM-CLQG
+struct ADMMCLQGSolver
+    # Stored quantities
+    prob::DynLQGame
+    vi::AVI
+    mpvi::mpAVI
+    mpvi_reg::mpAVI
+    predmod::NamedTuple
+    x0::Vector{Float64}
+    luH::LinearAlgebra.Factorization # LU parametrization
+    f::Vector{Float64}
+    proj_X::Clarabel.Solver
+    proj_U::Clarabel.Solver
+
+    # Primal vars
+    x::Vector{Float64}
+    u::Vector{Float64}
+    # Dual vars
+    λ::Vector{Float64}
+    μ::Vector{Float64}
+    # Aux vars
+    z::Vector{Float64}
+    ω::Vector{Float64}
+
+    # Parameters
+    ρ::Float64 # Regularization factor
+
+    params::IterativeSolverParams
+    status::Ref{Symbol}
+end
+
+function update_x0!(solver::ADMMCLQGSolver, x0::Vector{Float64})
+    @assert length(x0) == solver.prob.nx
+    vi = AVI(solver.mpvi, x0)
+    solver.vi.f[:] = vi.f[:]
+    solver.vi.b[:] = vi.b[:]
+    f[:] = AVI(solver.mpvi_reg, x0).f
+end
+
+function CommonSolve.init(prob::DynLQGame, ::Type{ADMMCLQGSolver};
+    T_hor::Union{Int,Nothing}=nothing,
+    x0::Union{AbstractVector,Nothing}=nothing,
+    ρ::Float64=0.5,
+    params::IterativeSolverParams=IterativeSolverParams())
+
+    # Compute regularized VI
+    game_reg = deepcopy(prob)
+    # add regularizer
+    map!(Qi -> Qi + ρ .* I(game_reg.nx), game_reg.Q, game_reg.Q)
+    map!(Pi -> Pi + ρ .* I(game_reg.nx), game_reg.P, game_reg.P)
+    for i = 1:prob.N
+        game_reg.R[i][i] = game_reg.R[i][i] + ρ .* I(prob.nu[i])
+    end
+    if isnothing(T_hor)
+        @error "[ADMMCLQGSolver] T_hor cannot be unspecified"
+    else
+        mpvi_reg = DynLQGame2mpAVI(game_reg, T_hor)
+        mpvi = DynLQGame2mpAVI(prob, T_hor) # Used to compute residual
+    end
+    if isnothing(x0)
+        @error "[ADMMCLQGSolver] x_0 cannot be unspecified"
+    else
+        vi = AVI(mpvi, x0)
+        vi_reg = AVI(mpvi_reg, x0)
+        luH = lu(vi_reg.H)
+        f = vi_reg.f
+    end
+
+    # Initialize projection on state space
+    proj_X = Clarabel.Solver()
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
+    Cx = SparseMatrixCSC(kron(I(T_hor), prob.C_x))
+    dx = kron(ones(T_hor), prob.b_x)
+    cone = [Clarabel.NonnegativeConeT(size(Cx, 1))] # Sets all constraints to inequalities
+    Q = spdiagm(0 => ones(Float64, prob.nx * T_hor)) # Sparse identity
+    q = zeros(prob.nx * T_hor)
+    Clarabel.setup!(proj_X, Q, q, Cx, dx, cone, settings)
+
+    # Initialize projection on input space
+    proj_U = Clarabel.Solver()
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
+    Cu_loc = BlockDiagonal(map(Cu_i -> kron(I(T_hor), Cu_i), prob.C_loc_i))
+    du_loc = vcat(map(bu_i -> kron(ones(T_hor), bu_i), prob.b_loc_i)...)
+
+    Cu_sh = hcat(map(Cu_i -> kron(I(T_hor), Cu_i), prob.C_u_i)...)
+    du_sh = kron(ones(T_hor), prob.b_u)
+    Cu = SparseMatrixCSC([Cu_loc; Cu_sh])
+    du = [du_loc; du_sh]
+    cone = [Clarabel.NonnegativeConeT(size(Cu, 1))] # Sets all constraints to inequalities
+    Q = spdiagm(0 => ones(Float64, sum(prob.nu) * T_hor))
+    q = zeros(sum(prob.nu) * T_hor)
+    Clarabel.setup!(proj_U, Q, q, Cu, du, cone, settings)
+
+    # Store prediction model for the linear system
+    Γ, _, Θ, k = generate_prediction_model(prob.A, prob.Bi, T_hor)
+    predmod = (Γ=SparseMatrixCSC(Γ), Θ=SparseMatrixCSC(Θ), k=k)
+
+    # check for trivial infeasibility: A[i,:] = 0, b[i]<0 for some i
+    # zero_rows = findall(row -> norm(row) < params.tol, eachrow(prob.A))
+    # for idx_row in zero_rows
+    #     if prob.b[idx_row] < 0
+    #         #TODO: fix
+    #         return ADMMCLQGSolver(prob, Q, M2, M2minusQ, M2plusQ, M2x_plus_f, proj, y, x, Ref(:Infeasible), params)
+    #     end
+    # end
+
+    return ADMMCLQGSolver(prob, vi, mpvi, mpvi_reg, predmod, x0, luH, f, proj_X, proj_U, # Stored quantities
+        zeros(prob.nx * T_hor), zeros(sum(prob.nu) * T_hor), # Primal vars init
+        zeros(prob.nx * T_hor), zeros(sum(prob.nu) * T_hor), # Dual vars init
+        zeros(prob.nx * T_hor), zeros(sum(prob.nu) * T_hor), # Aux vars init
+        ρ, params, Ref(:Initialized))
+end
+
+function CommonSolve.step!(solver::ADMMCLQGSolver)
+    # Update affine part of the regularized game
+    f = solver.f + solver.predmod.Γ' * (solver.λ - solver.ρ * solver.z) + (solver.μ - solver.ρ * solver.ω)
+
+    # Solve unconstrained game
+    solver.u[:] = solver.luH \ (-f)
+    mul!(solver.x, solver.predmod.Γ, solver.u)
+    mul!(solver.x, solver.predmod.Θ, solver.x0, 1.0, 1.0)
+    solver.x .+= solver.predmod.k
+
+    # Slack variable update
+    Clarabel.update_q!(solver.proj_X, -(solver.x + solver.λ ./ solver.ρ))
+    results = Clarabel.solve!(solver.proj_X)
+    solver.z[:] = results.x
+
+    if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
+        solver.x = nothing
+        solver.status[] = :Infeasible
+        return solver
+    end
+
+    Clarabel.update_q!(solver.proj_U, -(solver.u + solver.μ ./ solver.ρ))
+    results = Clarabel.solve!(solver.proj_U)
+    solver.ω[:] = results.x
+
+    if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
+        solver.x = nothing
+        solver.status[] = :Infeasible
+        return solver
+    end
+
+    # Dual update 
+    solver.λ .+= solver.ρ .* (solver.x - solver.z)
+    solver.μ .+= solver.ρ .* (solver.u - solver.ω)
+
+    return solver
+end
+
+
+function CommonSolve.solve!(solver::ADMMCLQGSolver)
+    res = Inf
+    for k in 1:solver.params.max_iter
+        CommonSolve.step!(solver)
+        if solver.status[] == :Infeasible
+            @warn "[ADMMCLQGSolver] Infeasibility detected"
+            break
+        end
+        if mod(k, 10) == 0
+            res = compute_residual(solver.vi, solver.u)
+            if solver.params.verbose
+                println("[ADMMCLQGSolver] Residual = $res")
+            end
+            if res < solver.params.tol
+                solver.status[] = :Solved
+                break
+            end
+        end
+        if k == solver.params.max_iter
+            solver.status[] = :MaximumIterationsReached
+            @warn "[ADMMCLQGSolver] Maximum iterations reached, residual = $res"
+            break
+        end
+    end
+    solution = (u=solver.u, status=solver.status[], residual=res)
+    return solution
+end
+
 ##### mpAVI solvers #####
 
 # Compatibility layer with ParametricDAQP
@@ -398,15 +573,5 @@ function CommonSolve.solve!(pDAQP::ParametricDAQPSolver)
     ParametricDAQP.mpsolve(prob, Θ; opts=pDAQP.options)
 end
 
-
-##### UnconstrainedDynLQGame solvers #####
-#TODO: Dynamic programming solver, see " ADMM-iCLQG: A Fast Solver of Constrained Dynamic Games for  Planning Multi-Vehicle Feedback Trajectory"
-# struct HJBSolver
-
-# end
-
-# function CommonSolve.step!(solver::HJBSolver)
-
-# end
 
 

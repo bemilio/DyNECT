@@ -56,7 +56,8 @@ avi = DyNECT.AVI(mpvi, x0)
 
 params = DyNECT.IterativeSolverParams(verbose=true)
 
-
+ADMM_sol = CommonSolve.solve(game, DyNECT.ADMMCLQGSolver; x0=x0, T_hor=T_hor, params=params)
+println("Solution residual ADMM = $(ADMM_sol.residual)")
 
 DGSQP_sol = CommonSolve.solve(avi, DyNECT.DGSQPSolver; params=params)
 println("Solution residual DGSQP = $(DGSQP_sol.residual)")
@@ -64,8 +65,9 @@ println("Solution residual DGSQP = $(DGSQP_sol.residual)")
 monviso_sol = CommonSolve.solve(avi, DyNECT.MonvisoSolver; method=:pg, params=params)
 println("Solution residual monviso = $(monviso_sol.residual)")
 
-solution = CommonSolve.solve(avi, DyNECT.DouglasRachford; params=params)
-println("Solution residual DR = $(solution.residual)")
+DR_sol = CommonSolve.solve(avi, DyNECT.DouglasRachford; params=params)
+println("Solution residual DR = $(DR_sol.residual)")
+
 
 # Solve multi-parametric problem
 # Range of initial states 
