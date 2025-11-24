@@ -25,21 +25,18 @@ struct DouglasRachford
     y::AbstractVector
     x::Union{AbstractVector,Nothing}
     status::Ref{Symbol}
+
+    stepsize::Float64
     params::IterativeSolverParams
 
 end
 
-function CommonSolve.init(prob::AVI, ::Type{DouglasRachford}; Q=nothing, params::IterativeSolverParams=IterativeSolverParams())
-    n = size(prob.H, 1)
+function CommonSolve.init(prob::AVI, ::Type{DouglasRachford}; Q=nothing, γ::Float64=0.5, stepsize::Float64=0.5, params::IterativeSolverParams=IterativeSolverParams())
+    n = prob.n
     # Regularization matrix
-    if Q === nothing
-        Q = I(n)
+    if isnothing(Q)
+        Q = γ .* I(n) + (1 - γ) * (prob.H + prob.H') ./ 2
     end
-
-    if isnothing(params.stepsize)
-        params.stepsize = 0.5
-    end
-
     # Compute warmstart point
     if params.warmstart == :NoWarmStart
         x = zeros(n)
@@ -54,16 +51,19 @@ function CommonSolve.init(prob::AVI, ::Type{DouglasRachford}; Q=nothing, params:
     zero_rows = findall(row -> norm(row) < params.tol, eachrow(prob.A))
     for idx_row in zero_rows
         if prob.b[idx_row] < 0
-            return DouglasRachford(prob, Q, M2, M2minusQ, M2plusQ, M2x_plus_f, proj, y, x, Ref(:Infeasible), params)
+            return DouglasRachford(prob, Q, M2, M2minusQ, M2plusQ, M2x_plus_f, proj, y, x, Ref(:Infeasible), stepsize, params)
         end
     end
 
     # Precompute auxiliary matrices
-    M1 = (prob.H + prob.H') / 4
-    M2 = SparseMatrixCSC(M1 + (prob.H - prob.H') / 2)
+    H_sym = (prob.H + prob.H') ./ 2
+    H_antisym = (prob.H - prob.H') ./ 2
+    M1 = γ * H_sym
+    M2 = (1 - γ) * H_sym + H_antisym
     M1plusQ = SparseMatrixCSC(triu(M1 + Q)) # Clarabel convention: upper-triangular matrix
     M2minusQ = SparseMatrixCSC(M2 - Q)
     M2plusQ = lu(M2 + Q)
+    M2 = SparseMatrixCSC(M2)
     M2x_plus_f = zeros(n) # pre-allocation, updated in iterations
     y = zeros(n) # pre-allocation, updated in iterations
 
@@ -74,7 +74,7 @@ function CommonSolve.init(prob::AVI, ::Type{DouglasRachford}; Q=nothing, params:
     A = SparseMatrixCSC(prob.A)
     Clarabel.setup!(proj, M1plusQ, M2x_plus_f, A, prob.b, cone, settings)
 
-    return DouglasRachford(prob, Q, M2, M2minusQ, M2plusQ, M2x_plus_f, proj, y, x, Ref(:Initialized), params)
+    return DouglasRachford(prob, Q, M2, M2minusQ, M2plusQ, M2x_plus_f, proj, y, x, Ref(:Initialized), stepsize, params)
 end
 
 function CommonSolve.step!(DR::DouglasRachford)
@@ -82,19 +82,20 @@ function CommonSolve.step!(DR::DouglasRachford)
     mul!(DR.M2x_plus_f, DR.M2minusQ, DR.x, 1.0, 1.0)
     Clarabel.update_q!(DR.proj, DR.M2x_plus_f)
     results = Clarabel.solve!(DR.proj)
-    DR.y[:] = results.x
     if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
-        DR.x = nothing
+        DR.x[:] = NaN .* ones(length(DR.x))
         DR.status[] = :Infeasible
         return DR
     end
-    DR.y[:] = 2 * DR.params.stepsize * DR.y + (1 - 2 * DR.params.stepsize) * DR.x
+    tmp = (2 * DR.stepsize) .* results.x + (1 - 2 * DR.stepsize) .* DR.x # Can this be optimized?
+    mul!(DR.y, DR.Q, tmp)
     mul!(DR.y, DR.M2, DR.x, 1.0, 1.0)
     ldiv!(DR.x, DR.M2plusQ, DR.y)
 end
 
 function CommonSolve.solve!(DR::DouglasRachford)
     res = Inf
+    n_iter = 0
     for k in 1:DR.params.max_iter
         CommonSolve.step!(DR)
         if DR.status[] == :Infeasible
@@ -105,16 +106,18 @@ function CommonSolve.solve!(DR::DouglasRachford)
             res = compute_residual(DR.prob, DR.x)
             if res < DR.params.tol
                 DR.status[] = :Solved
+                n_iter = k
                 break
             end
         end
         if k == DR.params.max_iter
             DR.status[] = :MaximumIterationsReached
             @warn "[DouglasRachford::solve] Maximum iterations reached, residual = $res"
+            n_iter = k
             break
         end
     end
-    solution = (x=DR.x, status=DR.status[], residual=res)
+    solution = (x=DR.x, status=DR.status[], residual=res, iterations=n_iter)
     return solution
 end
 
@@ -253,8 +256,8 @@ function CommonSolve.step!(solver::DGSQPSolver)
     # Watchdog line search
     eps = 0.0001
     if norm(C - s) > eps
-        ∇γ = [solver.prob.H' * (solver.prob.H * x + solver.prob.f + solver.prob.A'λ);
-            solver.prob.A * (solver.prob.H * x + solver.prob.f + solver.prob.A'λ)]
+        ∇γ = [solver.prob.H' * (solver.prob.H * solver.x + solver.prob.f + solver.prob.A' * solver.λ);
+            solver.prob.A * (solver.prob.H * solver.x + solver.prob.f + solver.prob.A' * solver.λ)]
         ρ = 0.5
         μ = ∇γ' * [p_x; p_λ] / ((1 - ρ) * norm(C - s, 1))
     else
@@ -519,17 +522,18 @@ end
 struct ParametricDAQPSolver
     mpAVI::mpAVI
     options::ParametricDAQP.Settings
+    status::Ref{Symbol}
 end
 
 function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     eps_zero::Float64=1e-12,
-    verbose::Int64=1,
+    verbose::Bool=true,
     store_AS::Bool=true,
     store_points::Bool=true,
     store_regions::Bool=true,
     store_dual::Bool=false,
     remove_redundant::Bool=true,
-    time_limit::Int64=100000,
+    time_limit::Int64=10000,
     chunk_size::Int64=1000,
     factorization::Symbol=:chol,
     postcheck_rank::Bool=true,
@@ -550,7 +554,7 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
         lowdim_tol,
         early_stop)
 
-    return ParametricDAQPSolver(prob, options)
+    return ParametricDAQPSolver(prob, options, Ref(:Initialized))
 
 end
 

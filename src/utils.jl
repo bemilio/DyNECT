@@ -201,3 +201,18 @@ function compute_residual(prob::AVI, x::AbstractVector)
     r = norm(x - x_transf)
     return r
 end
+
+```
+Set the limits of the parameter space to an mpAVI
+```
+function setParameterSpace(mpavi::mpAVI;
+    C::Union{AbstractMatrix{Float64},Nothing}=nothing,
+    d::Union{AbstractVector{Float64},Nothing}=nothing,
+    ub::Union{AbstractVector{Float64},Nothing}=nothing,
+    lb::Union{AbstractVector{Float64},Nothing}=nothing)
+    C = isnothing(C) ? mpavi.C : C
+    d = isnothing(d) ? mpavi.d : d
+    ub = isnothing(ub) ? mpavi.ub : ub
+    lb = isnothing(lb) ? mpavi.lb : lb
+    return mpAVI(mpavi.H, mpavi.F, mpavi.f, mpavi.A, mpavi.B, mpavi.b; C, d, ub, lb)
+end

@@ -26,7 +26,7 @@ end
 function evaluatePWA(sol::ParametricDAQP.Solution, θ::Vector{Float64})
     θ_normalized = (θ - sol.translation) .* sol.scaling
     all_CRs_indexes = find_CR(θ_normalized, sol)
-    if !isempty(all_CRs_indexes)
+    if !isnothing(all_CRs_indexes)
         CR = sol.CRs[all_CRs_indexes[1]]
         return CR.z' * [θ_normalized; 1]
     else

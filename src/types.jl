@@ -262,6 +262,8 @@ struct mpAVI
     end
 end
 
+
+
 struct AVI
     # VI(Hx + f, Ax <= b)
     # where f, b are the last rows of F,B, respect.
