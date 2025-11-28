@@ -121,6 +121,58 @@ function CommonSolve.solve!(DR::DouglasRachford)
     return solution
 end
 
+# Log-domain interior point method [Liu, Liao-McPherson 2025]
+struct LogIPMSolver
+    prob::AVI
+    # Q::SparseMatrixCSC #Regularization matrix
+
+    x::Union{AbstractVector,Nothing}
+    status::Ref{Symbol}
+
+    stepsize::Float64
+    params::IterativeSolverParams
+
+end
+
+function CommonSolve.init(prob::AVI, ::Type{LogIPMSolver}; stepsize::Float64=0.5, params::IterativeSolverParams=IterativeSolverParams())
+
+
+    return LogIPMSolver(prob, x, Ref(:Initialized), stepsize, params)
+end
+
+function CommonSolve.step!(solver::LogIPMSolver)
+
+end
+
+function CommonSolve.solve!(solver::LogIPMSolver)
+    res = Inf
+    n_iter = 0
+    for k in 1:solver.params.max_iter
+        CommonSolve.step!(solver)
+        if solver.status[] == :Infeasible
+            @warn "[LogIPMSolver::solve] Infeasibility detected"
+            break
+        end
+        if mod(k, 10) == 0
+            res = compute_residual(solver.prob, solver.x)
+            if res < solver.params.tol
+                solver.status[] = :Solved
+                n_iter = k
+                break
+            end
+        end
+        if k == solver.params.max_iter
+            solver.status[] = :MaximumIterationsReached
+            @warn "[LogIPMSolver::solve] Maximum iterations reached, residual = $res"
+            n_iter = k
+            break
+        end
+    end
+    solution = (x=solver.x, status=solver.status[], residual=res, iterations=n_iter)
+    return solution
+end
+
+
 # Compatibility layer with Monviso
 
 struct MonvisoSolver
@@ -464,7 +516,7 @@ function CommonSolve.step!(solver::ADMMCLQGSolver)
     solver.z[:] = results.x
 
     if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
-        solver.x = nothing
+        solver.x = NaN .* ones(solver.prob.n)
         solver.status[] = :Infeasible
         return solver
     end
@@ -474,7 +526,7 @@ function CommonSolve.step!(solver::ADMMCLQGSolver)
     solver.ω[:] = results.x
 
     if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
-        solver.x = nothing
+        solver.x = NaN .* ones(solver.prob.n)
         solver.status[] = :Infeasible
         return solver
     end
@@ -523,6 +575,7 @@ struct ParametricDAQPSolver
     mpAVI::mpAVI
     options::ParametricDAQP.Settings
     status::Ref{Symbol}
+    AS0::Vector{Int64}
 end
 
 function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
@@ -554,7 +607,44 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
         lowdim_tol,
         early_stop)
 
-    return ParametricDAQPSolver(prob, options, Ref(:Initialized))
+
+    # Solve feasibility problem in (x,θ)-space to find initial active set:
+    # Find (x,θ) s.t. Cθ ≤ d ; lb ≤ θ ≤ ub ; Ax ≤ Bθ + b
+    qp = Clarabel.Solver()
+    settings = Clarabel.Settings(verbose=false)
+    A_θ = [prob.C; Matrix{Float64}(I(prob.n_θ)); -Matrix{Float64}(I(prob.n_θ))]
+    b_θ = [prob.d; prob.ub; -prob.lb]
+    A_θ_x = SparseMatrixCSC([-prob.B prob.A; A_θ zeros(size(A_θ, 1), prob.n)])
+    b_θ_x = [prob.b; b_θ]
+    cone = [Clarabel.NonnegativeConeT(size(A_θ_x, 1))] # Sets all constraints to inequalities
+    H_θ_x = SparseMatrixCSC(Matrix{Float64}(I(prob.n_θ + prob.n)))
+    f_θ_x = zeros(prob.n_θ + prob.n)
+    Clarabel.setup!(qp, H_θ_x, f_θ_x, A_θ_x, b_θ_x, cone, settings)
+    results = Clarabel.solve!(qp)
+
+    if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
+        @warn("[ParametricDAQPSolver::init] Could not find a θ for which the mpAVI is feasible")
+        return ParametricDAQPSolver(prob, options, Ref(:Infeasible), Vector{Int64}())
+    end
+
+    θ = results.x[1:prob.n_θ]
+
+    # Solve AVI for the given θ
+    tol = 1e-4
+    avi = AVI(prob, θ)
+    avi_sol = CommonSolve.solve(avi, DGSQPSolver; params=IterativeSolverParams(warmstart=:UnconstrainedSolution, tol=tol))
+    x = avi_sol.x
+    if avi_sol.status == :Infeasible
+        @warn("[ParametricDAQPSolver::init] Could not solve AVI to find the initial active set.")
+        return ParametricDAQPSolver(prob, options, Ref(:Infeasible), Vector{Int64}())
+    end
+    if avi_sol.status == :MaximumIterationsReached
+        @warn("[ParametricDAQPSolver::init] Maximum iterations reached while solving AVI for initial active set. Residual = $(avi_sol.residual)")
+    end
+
+    # Retrieve initial active set
+    AS0 = findall(prob.A * x .>= prob.B * θ + prob.b .- tol)
+    return ParametricDAQPSolver(prob, options, Ref(:Initialized), AS0)
 
 end
 
@@ -563,7 +653,7 @@ function CommonSolve.solve!(pDAQP::ParametricDAQPSolver)
     prob = ParametricDAQP.MPVI(pDAQP.mpAVI.H, pDAQP.mpAVI.F, pDAQP.mpAVI.f, pDAQP.mpAVI.A, pDAQP.mpAVI.B, pDAQP.mpAVI.b)
     n_θ = size(pDAQP.mpAVI.C, 2)
     Θ = (A=pDAQP.mpAVI.C', b=pDAQP.mpAVI.d, ub=pDAQP.mpAVI.ub, lb=pDAQP.mpAVI.lb)
-    (sol, info) = ParametricDAQP.mpsolve(prob, Θ; opts=pDAQP.options)
+    (sol, info) = ParametricDAQP.mpsolve(prob, Θ; opts=pDAQP.options, AS0=pDAQP.AS0)
     return sol
 end
 

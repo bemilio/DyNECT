@@ -205,7 +205,7 @@ end
 
 struct mpAVI
     # VI(Hx + Fθ + f, Ax ≤ Bθ + b)
-    # With θ ∈ { Cθ ≤ b } ∩ { lb ≤ θ ≤ ub }
+    # With θ ∈ { Cθ ≤ d } ∩ { lb ≤ θ ≤ ub }
     H::AbstractMatrix # size = n_x * n_x
     F::AbstractMatrix # size =  n_x * n_θ
     f::AbstractVector # size =  n_x
