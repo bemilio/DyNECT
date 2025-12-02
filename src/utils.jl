@@ -195,10 +195,17 @@ end
 function compute_residual(prob::AVI, x::AbstractVector)
     y = x - (prob.H * x + prob.f)
     #TODO: Switch to Clarabel
-    proj = DAQP.Model()
-    DAQP.setup(proj, Matrix{Float64}(I, prob.n, prob.n), -y, prob.A, prob.b, Float64[], zeros(Cint, prob.m))
-    x_transf, _, _, _ = DAQP.solve(proj)
-    r = norm(x - x_transf)
+    # proj = DAQP.Model()
+    # DAQP.setup(proj, Matrix{Float64}(I, prob.n, prob.n), -y, prob.A, prob.b, Float64[], zeros(Cint, prob.m))
+    # x_transf, _, _, _ = DAQP.solve(proj)
+    # r = norm(x - x_transf)
+    qp = Clarabel.Solver()
+    eye = spdiagm(0 => ones(Float64, prob.n))
+    settings = Clarabel.Settings(verbose=false, tol_gap_abs=1e-10, tol_feas=1e-10, tol_gap_rel=0.0)
+    cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
+    Clarabel.setup!(qp, eye, -y, prob.A, prob.b, cone, settings)
+    results = Clarabel.solve!(qp)
+    r = norm(x - results.x)
     return r
 end
 

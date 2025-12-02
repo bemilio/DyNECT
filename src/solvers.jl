@@ -532,7 +532,7 @@ function CommonSolve.step!(solver::ADMMCLQGSolver)
     solver.z[:] = results.x
 
     if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
-        solver.u = NaN .* ones(sum(solver.prob.nu) * solver.T_hor)
+        solver.u = fill(NaN, length(solver.u))
         solver.status[] = :Infeasible
         return solver
     end
