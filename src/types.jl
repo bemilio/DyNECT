@@ -303,12 +303,14 @@ mutable struct IterativeSolverParams
     tol::Float64
     warmstart::Symbol
     verbose::Bool
+    time_limit::Float64
 end
 
 function IterativeSolverParams(; max_iter::Int=10000,
     stepsize::Union{Float64,Nothing}=nothing,
     tol::Float64=1e-6,
     warmstart::Symbol=:NoWarmStart,
-    verbose::Bool=false)
-    return IterativeSolverParams(max_iter, stepsize, tol, warmstart, verbose)
+    verbose::Bool=false,
+    time_limit::Float64=1e2)
+    return IterativeSolverParams(max_iter, stepsize, tol, warmstart, verbose, time_limit)
 end

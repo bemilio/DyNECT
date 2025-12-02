@@ -55,7 +55,19 @@ mpvi = DynLQGame2mpAVI(game, T_hor)
 x0 = 2 .* randn(game.nx)
 avi = DyNECT.AVI(mpvi, x0)
 
-params = DyNECT.IterativeSolverParams(verbose=true)
+# Solve multi-parametric problem
+# Range of initial states 
+nx = size(A, 1)
+mpvi.ub[:] = 5. * ones(nx)
+mpvi.lb[:] = -5. * ones(nx)
+mpvi_sol = CommonSolve.solve(mpvi, DyNECT.ParametricDAQPSolver)
+
+pDAQP_sol = DyNECT.evaluatePWA(mpvi_sol, x0)
+pDAQP_res = DyNECT.compute_residual(avi, pDAQP_sol)
+println("Solution residual pDAQP (explicit) = $pDAQP_res")
+
+
+params = DyNECT.IterativeSolverParams(verbose=true, time_limit=1e-3)
 
 DR_sol = CommonSolve.solve(avi, DyNECT.DouglasRachford; params=params)
 println("Solution residual DR = $(DR_sol.residual)")
@@ -69,16 +81,7 @@ println("Solution residual DGSQP = $(DGSQP_sol.residual)")
 monviso_sol = CommonSolve.solve(avi, DyNECT.MonvisoSolver; method=:pg, params=params)
 println("Solution residual monviso = $(monviso_sol.residual)")
 
-# Solve multi-parametric problem
-# Range of initial states 
-nx = size(A, 1)
-mpvi.ub[:] = 5. * ones(nx)
-mpvi.lb[:] = -5. * ones(nx)
-mpvi_sol = CommonSolve.solve(mpvi, DyNECT.ParametricDAQPSolver)
 
-pDAQP_sol = DyNECT.evaluatePWA(mpvi_sol, x0)
-pDAQP_res = DyNECT.compute_residual(avi, pDAQP_sol)
-println("Solution residual pDAQP (explicit) = $pDAQP_res")
 
 
 #TODO: Turn the comparison between multi-parametric solution and explicit solution into test

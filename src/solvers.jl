@@ -96,23 +96,28 @@ end
 function CommonSolve.solve!(DR::DouglasRachford)
     res = Inf
     n_iter = 0
+    t0 = time()
     for k in 1:DR.params.max_iter
         CommonSolve.step!(DR)
         if DR.status[] == :Infeasible
             @warn "[DouglasRachford::solve] Infeasibility detected"
             break
         end
-        if mod(k, 10) == 0
-            res = compute_residual(DR.prob, DR.x)
-            if res < DR.params.tol
-                DR.status[] = :Solved
-                n_iter = k
-                break
-            end
+        res = compute_residual(DR.prob, DR.x)
+        if res < DR.params.tol
+            DR.status[] = :Solved
+            n_iter = k
+            break
         end
         if k == DR.params.max_iter
             DR.status[] = :MaximumIterationsReached
             @warn "[DouglasRachford::solve] Maximum iterations reached, residual = $res"
+            n_iter = k
+            break
+        end
+        if time() - t0 > DR.params.time_limit
+            DR.status[] = :TimeLimitReached
+            println("[DouglasRachford::solve] Time limit reached, residual = $res ")
             n_iter = k
             break
         end
@@ -153,13 +158,11 @@ function CommonSolve.solve!(solver::LogIPMSolver)
             @warn "[LogIPMSolver::solve] Infeasibility detected"
             break
         end
-        if mod(k, 10) == 0
-            res = compute_residual(solver.prob, solver.x)
-            if res < solver.params.tol
-                solver.status[] = :Solved
-                n_iter = k
-                break
-            end
+        res = compute_residual(solver.prob, solver.x)
+        if res < solver.params.tol
+            solver.status[] = :Solved
+            n_iter = k
+            break
         end
         if k == solver.params.max_iter
             solver.status[] = :MaximumIterationsReached
@@ -221,22 +224,26 @@ end
 
 function CommonSolve.solve!(solver::MonvisoSolver)
     res = Inf
+    t0 = time()
     for k in 1:solver.params.max_iter
         CommonSolve.step!(solver)
         if solver.status == :Infeasible
             @warn "[MonvisoSolver] Infeasibility detected"
             break
         end
-        if mod(k, 10) == 0
-            res = compute_residual(solver.prob, solver.x)
-            if res < solver.params.tol
-                solver.status[] = :Solved
-                break
-            end
+        res = compute_residual(solver.prob, solver.x)
+        if res < solver.params.tol
+            solver.status[] = :Solved
+            break
         end
         if k == solver.params.max_iter
             solver.status[] = :MaximumIterationsReached
             @warn "[MonvisoSolver] Maximum iterations reached, residual = $res"
+            break
+        end
+        if time() - t0 > solver.params.time_limit
+            solver.status[] = :TimeLimitReached
+            println("[MonvisoSolver::solve] Time limit reached, residual = $res ")
             break
         end
     end
@@ -358,25 +365,29 @@ end
 
 function CommonSolve.solve!(solver::DGSQPSolver)
     res = Inf
+    t0 = time()
     for k in 1:solver.params.max_iter
         CommonSolve.step!(solver)
         if solver.status[] == :Infeasible
             @warn "[DGSQPSolver::solve] Infeasibility detected"
             break
         end
-        if mod(k, 10) == 0
-            res = compute_residual(solver.prob, solver.x)
-            if solver.params.verbose
-                println("[DGSQPSolver] Residual = $res")
-            end
-            if res < solver.params.tol
-                solver.status[] = :Solved
-                break
-            end
+        res = compute_residual(solver.prob, solver.x)
+        if solver.params.verbose
+            println("[DGSQPSolver] Residual = $res")
+        end
+        if res < solver.params.tol
+            solver.status[] = :Solved
+            break
         end
         if k == solver.params.max_iter
             solver.status[] = :MaximumIterationsReached
             @warn "[DGSQPSolver::solve] Maximum iterations reached, residual = $res"
+            break
+        end
+        if time() - t0 > solver.params.time_limit
+            solver.status[] = :TimeLimitReached
+            println("[DGSQPSolver::solve] Time limit reached, residual = $res ")
             break
         end
     end
@@ -541,25 +552,29 @@ end
 
 function CommonSolve.solve!(solver::ADMMCLQGSolver)
     res = Inf
+    t0 = time()
     for k in 1:solver.params.max_iter
         CommonSolve.step!(solver)
         if solver.status[] == :Infeasible
             @warn "[ADMMCLQGSolver] Infeasibility detected"
             break
         end
-        if mod(k, 10) == 0
-            res = compute_residual(solver.vi, solver.u)
-            if solver.params.verbose
-                println("[ADMMCLQGSolver] Residual = $res")
-            end
-            if res < solver.params.tol
-                solver.status[] = :Solved
-                break
-            end
+        res = compute_residual(solver.vi, solver.u)
+        if solver.params.verbose
+            println("[ADMMCLQGSolver] Residual = $res")
+        end
+        if res < solver.params.tol
+            solver.status[] = :Solved
+            break
         end
         if k == solver.params.max_iter
             solver.status[] = :MaximumIterationsReached
             @warn "[ADMMCLQGSolver] Maximum iterations reached, residual = $res"
+            break
+        end
+        if time() - t0 > solver.params.time_limit
+            solver.status[] = :TimeLimitReached
+            println("[ADMMCLQGSolver::solve] Time limit reached, residual = $res ")
             break
         end
     end
