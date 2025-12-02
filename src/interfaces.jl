@@ -3,14 +3,13 @@
 
 function find_CR(x0::Vector{Float64}, sol; eps_gap=1e-5)
     #Find the critical region for x0
-    contained_in = Int64[]
     for (ind, region) in enumerate(sol.CRs)
         violation = minimum(region.bth - region.Ath' * x0)
         if (violation >= -eps_gap)
-            push!(contained_in, ind)
+            return region
         end
     end
-    return isempty(contained_in) ? nothing : contained_in[1]
+    return nothing
 end
 
 function first_input_of_sequence(u::Vector{Float64}, nu::Vector{Int64}, N::Int64, T_hor::Int64)
@@ -25,9 +24,8 @@ end
 
 function evaluatePWA(sol::ParametricDAQP.Solution, θ::Vector{Float64})
     θ_normalized = (θ - sol.translation) .* sol.scaling
-    all_CRs_indexes = find_CR(θ_normalized, sol)
-    if !isnothing(all_CRs_indexes)
-        CR = sol.CRs[all_CRs_indexes[1]]
+    CR = find_CR(θ_normalized, sol)
+    if !isnothing(CR)
         return CR.z' * [θ_normalized; 1]
     else
         return nothing

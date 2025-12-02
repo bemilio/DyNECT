@@ -69,7 +69,7 @@ function CommonSolve.init(prob::AVI, ::Type{DouglasRachford}; Q=nothing, γ::Flo
 
     # Compute projection operator
     proj = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false, tol_gap_abs=1e-10, tol_feas=1e-10, tol_gap_rel=0.0)
     cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
     A = SparseMatrixCSC(prob.A)
     Clarabel.setup!(proj, M1plusQ, M2x_plus_f, A, prob.b, cone, settings)
@@ -109,6 +109,7 @@ function CommonSolve.solve!(DR::DouglasRachford)
             n_iter = k
             break
         end
+        ((k % 100 == 0) && DR.params.verbose) && println("Iteration $k, Residual = $res")
         if k == DR.params.max_iter
             DR.status[] = :MaximumIterationsReached
             @warn "[DouglasRachford::solve] Maximum iterations reached, residual = $res"
@@ -164,6 +165,7 @@ function CommonSolve.solve!(solver::LogIPMSolver)
             n_iter = k
             break
         end
+        ((k % 100 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
         if k == solver.params.max_iter
             solver.status[] = :MaximumIterationsReached
             @warn "[LogIPMSolver::solve] Maximum iterations reached, residual = $res"
@@ -236,6 +238,7 @@ function CommonSolve.solve!(solver::MonvisoSolver)
             solver.status[] = :Solved
             break
         end
+        ((k % 100 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
         if k == solver.params.max_iter
             solver.status[] = :MaximumIterationsReached
             @warn "[MonvisoSolver] Maximum iterations reached, residual = $res"
@@ -274,7 +277,8 @@ function CommonSolve.init(prob::AVI, ::Type{DGSQPSolver}; max_watchdog_iter::Int
     regularization = 0.1
     B = SparseMatrixCSC((prob.H + prob.H') / 2 + regularization * I(prob.n))
     qp = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false, tol_gap_abs=1e-10, tol_feas=1e-10, tol_gap_rel=0.0)
+
     cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
     A = SparseMatrixCSC(prob.A)
 
@@ -380,6 +384,7 @@ function CommonSolve.solve!(solver::DGSQPSolver)
             solver.status[] = :Solved
             break
         end
+        ((k % 100 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
         if k == solver.params.max_iter
             solver.status[] = :MaximumIterationsReached
             @warn "[DGSQPSolver::solve] Maximum iterations reached, residual = $res"
@@ -468,7 +473,7 @@ function CommonSolve.init(prob::DynLQGame, ::Type{ADMMCLQGSolver};
 
     # Initialize projection on state space
     proj_X = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false, tol_gap_abs=1e-10, tol_feas=1e-10, tol_gap_rel=0.0)
     Cx = SparseMatrixCSC(kron(I(T_hor), prob.C_x))
     dx = kron(ones(T_hor), prob.b_x)
     cone = [Clarabel.NonnegativeConeT(size(Cx, 1))] # Sets all constraints to inequalities
@@ -478,7 +483,7 @@ function CommonSolve.init(prob::DynLQGame, ::Type{ADMMCLQGSolver};
 
     # Initialize projection on input space
     proj_U = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false, tol_gap_abs=1e-10, tol_feas=1e-10, tol_gap_rel=0.0)
     Cu_loc = BlockDiagonal(map(Cu_i -> kron(I(T_hor), Cu_i), prob.C_loc_i))
     du_loc = vcat(map(bu_i -> kron(ones(T_hor), bu_i), prob.b_loc_i)...)
 
@@ -527,7 +532,7 @@ function CommonSolve.step!(solver::ADMMCLQGSolver)
     solver.z[:] = results.x
 
     if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
-        solver.x = NaN .* ones(solver.prob.n)
+        solver.u = NaN .* ones(sum(solver.prob.nu) * solver.T_hor)
         solver.status[] = :Infeasible
         return solver
     end
@@ -563,6 +568,7 @@ function CommonSolve.solve!(solver::ADMMCLQGSolver)
         if solver.params.verbose
             println("[ADMMCLQGSolver] Residual = $res")
         end
+        ((k % 100 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
         if res < solver.params.tol
             solver.status[] = :Solved
             break
