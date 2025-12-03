@@ -109,7 +109,7 @@ function CommonSolve.solve!(DR::DouglasRachford)
             n_iter = k
             break
         end
-        ((k % 100 == 0) && DR.params.verbose) && println("Iteration $k, Residual = $res")
+        ((k % 1000 == 0) && DR.params.verbose) && println("[DouglasRachford::solve] Iteration $k, Residual = $res")
         if k == DR.params.max_iter
             DR.status[] = :MaximumIterationsReached
             @warn "[DouglasRachford::solve] Maximum iterations reached, residual = $res"
@@ -238,7 +238,7 @@ function CommonSolve.solve!(solver::MonvisoSolver)
             solver.status[] = :Solved
             break
         end
-        ((k % 100 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
+        ((k % 1000 == 0) && solver.params.verbose) && println("[MonvisoSolver] Iteration $k, Residual = $res")
         if k == solver.params.max_iter
             solver.status[] = :MaximumIterationsReached
             @warn "[MonvisoSolver] Maximum iterations reached, residual = $res"
@@ -384,7 +384,7 @@ function CommonSolve.solve!(solver::DGSQPSolver)
             solver.status[] = :Solved
             break
         end
-        ((k % 100 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
+        ((k % 1000 == 0) && solver.params.verbose) && println("[DGSQPSolver] Iteration $k, Residual = $res")
         if k == solver.params.max_iter
             solver.status[] = :MaximumIterationsReached
             @warn "[DGSQPSolver::solve] Maximum iterations reached, residual = $res"
@@ -532,7 +532,7 @@ function CommonSolve.step!(solver::ADMMCLQGSolver)
     solver.z[:] = results.x
 
     if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
-        solver.u = fill(NaN, length(solver.u))
+        solver.u[:] = fill(NaN, length(solver.u))
         solver.status[] = :Infeasible
         return solver
     end
@@ -565,10 +565,7 @@ function CommonSolve.solve!(solver::ADMMCLQGSolver)
             break
         end
         res = compute_residual(solver.vi, solver.u)
-        if solver.params.verbose
-            println("[ADMMCLQGSolver] Residual = $res")
-        end
-        ((k % 100 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
+        ((k % 1000 == 0) && solver.params.verbose) && println("[ADMMCLQGSolver] Iteration $k, Residual = $res")
         if res < solver.params.tol
             solver.status[] = :Solved
             break
