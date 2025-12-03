@@ -28,6 +28,7 @@ struct DouglasRachford
 
     stepsize::Float64
     params::IterativeSolverParams
+    last_res::Ref{Float64}
 
 end
 
@@ -51,7 +52,7 @@ function CommonSolve.init(prob::AVI, ::Type{DouglasRachford}; Q=nothing, γ::Flo
     zero_rows = findall(row -> norm(row) < params.tol, eachrow(prob.A))
     for idx_row in zero_rows
         if prob.b[idx_row] < 0
-            return DouglasRachford(prob, Q, M2, M2minusQ, M2plusQ, M2x_plus_f, proj, y, x, Ref(:Infeasible), stepsize, params)
+            return DouglasRachford(prob, Q, M2, M2minusQ, M2plusQ, M2x_plus_f, proj, y, x, Ref(:Infeasible), stepsize, params, Ref(Inf))
         end
     end
 
@@ -69,24 +70,25 @@ function CommonSolve.init(prob::AVI, ::Type{DouglasRachford}; Q=nothing, γ::Flo
 
     # Compute projection operator
     proj = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false, tol_gap_abs=1e-10, tol_feas=1e-10, tol_gap_rel=0.0)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
     cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
     A = SparseMatrixCSC(prob.A)
     Clarabel.setup!(proj, M1plusQ, M2x_plus_f, A, prob.b, cone, settings)
 
-    return DouglasRachford(prob, Q, M2, M2minusQ, M2plusQ, M2x_plus_f, proj, y, x, Ref(:Initialized), stepsize, params)
+    return DouglasRachford(prob, Q, M2, M2minusQ, M2plusQ, M2x_plus_f, proj, y, x, Ref(:Initialized), stepsize, params, Ref(Inf))
 end
 
 function CommonSolve.step!(DR::DouglasRachford)
     DR.M2x_plus_f[:] = DR.prob.f
     mul!(DR.M2x_plus_f, DR.M2minusQ, DR.x, 1.0, 1.0)
     Clarabel.update_q!(DR.proj, DR.M2x_plus_f)
-    results = Clarabel.solve!(DR.proj)
-    if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
+    results = solveQPRobust(DR.proj)
+    if results.status == :Infeasible
         DR.x[:] = NaN .* ones(length(DR.x))
         DR.status[] = :Infeasible
         return DR
     end
+
     tmp = (2 * DR.stepsize) .* results.x + (1 - 2 * DR.stepsize) .* DR.x # Can this be optimized?
     mul!(DR.y, DR.Q, tmp)
     mul!(DR.y, DR.M2, DR.x, 1.0, 1.0)
@@ -109,7 +111,17 @@ function CommonSolve.solve!(DR::DouglasRachford)
             n_iter = k
             break
         end
-        ((k % 100 == 0) && DR.params.verbose) && println("Iteration $k, Residual = $res")
+        if k % 1000 == 0
+            if res > DR.last_res[] - DR.params.tol / 10
+                DR.status[] = :NoImprovement
+                @warn "[DouglasRachford::solve] Solution not improving, residual = $res"
+                break
+            end
+            DR.last_res[] = res
+            if DR.params.verbose
+                println("Iteration $k, Residual = $res")
+            end
+        end
         if k == DR.params.max_iter
             DR.status[] = :MaximumIterationsReached
             @warn "[DouglasRachford::solve] Maximum iterations reached, residual = $res"
@@ -165,7 +177,7 @@ function CommonSolve.solve!(solver::LogIPMSolver)
             n_iter = k
             break
         end
-        ((k % 100 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
+        ((k % 1000 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
         if k == solver.params.max_iter
             solver.status[] = :MaximumIterationsReached
             @warn "[LogIPMSolver::solve] Maximum iterations reached, residual = $res"
@@ -238,7 +250,7 @@ function CommonSolve.solve!(solver::MonvisoSolver)
             solver.status[] = :Solved
             break
         end
-        ((k % 100 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
+        ((k % 1000 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
         if k == solver.params.max_iter
             solver.status[] = :MaximumIterationsReached
             @warn "[MonvisoSolver] Maximum iterations reached, residual = $res"
@@ -271,13 +283,14 @@ struct DGSQPSolver
     max_watchdog_iter::Int
     max_safe_linesearch_iter::Int
     status::Ref{Symbol}
+    last_res::Ref{Float64}
 end
 
 function CommonSolve.init(prob::AVI, ::Type{DGSQPSolver}; max_watchdog_iter::Int=5, max_safe_linesearch_iter::Int=20, params::IterativeSolverParams=IterativeSolverParams())
     regularization = 0.1
     B = SparseMatrixCSC((prob.H + prob.H') / 2 + regularization * I(prob.n))
     qp = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false, tol_gap_abs=1e-10, tol_feas=1e-10, tol_gap_rel=0.0)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
 
     cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
     A = SparseMatrixCSC(prob.A)
@@ -293,7 +306,7 @@ function CommonSolve.init(prob::AVI, ::Type{DGSQPSolver}; max_watchdog_iter::Int
 
     Clarabel.setup!(qp, B, zeros(prob.n), A, prob.b, cone, settings)
     merit = (x, λ, s, μ) -> 0.5 * norm(prob.H * x + prob.f + prob.A' * λ, 2)^2 + μ * norm(prob.A * x - prob.b - s, 1)
-    return DGSQPSolver(prob, x, zeros(prob.m), x, zeros(prob.m), Ref(0), Ref(0), Ref(Inf), merit, Ref(true), qp, params, max_watchdog_iter, max_safe_linesearch_iter, Ref(:Initialized))
+    return DGSQPSolver(prob, x, zeros(prob.m), x, zeros(prob.m), Ref(0), Ref(0), Ref(Inf), merit, Ref(true), qp, params, max_watchdog_iter, max_safe_linesearch_iter, Ref(:Initialized), Ref(Inf))
 end
 
 function CommonSolve.step!(solver::DGSQPSolver)
@@ -304,10 +317,17 @@ function CommonSolve.step!(solver::DGSQPSolver)
     Clarabel.update_b!(solver.qp, -C)
     results = Clarabel.solve!(solver.qp)
     p_x = results.x
-    if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
+    if results.status in (Clarabel.PRIMAL_INFEASIBLE,
+        Clarabel.DUAL_INFEASIBLE,
+        Clarabel.ALMOST_PRIMAL_INFEASIBLE,
+        Clarabel.ALMOST_DUAL_INFEASIBLE)
+
         solver.x .= NaN .* ones(solver.prob.n)
         solver.status[] = :Infeasible
         return solver
+    end
+    if results.status != Clarabel.SOLVED
+        @warn "[DGSQPSolver] Clarabel returned $(results.status)"
     end
     # Dual update
     d = results.z # Dual variable of the QP
@@ -377,8 +397,16 @@ function CommonSolve.solve!(solver::DGSQPSolver)
             break
         end
         res = compute_residual(solver.prob, solver.x)
-        if solver.params.verbose
-            println("[DGSQPSolver] Residual = $res")
+        if k % 1000 == 0
+            if res > solver.last_res[] - solver.params.tol / 10
+                solver.status[] = :NoImprovement
+                @warn "[DGSQPSolver::solve] Solution not improving, residual = $res"
+                break
+            end
+            solver.last_res[] = res
+            if solver.params.verbose
+                println("Iteration $k, Residual = $res")
+            end
         end
         if res < solver.params.tol
             solver.status[] = :Solved
@@ -432,6 +460,7 @@ struct ADMMCLQGSolver
 
     params::IterativeSolverParams
     status::Ref{Symbol}
+    last_res::Ref{Float64}
 end
 
 function update_x0!(solver::ADMMCLQGSolver, x0::Vector{Float64})
@@ -473,7 +502,7 @@ function CommonSolve.init(prob::DynLQGame, ::Type{ADMMCLQGSolver};
 
     # Initialize projection on state space
     proj_X = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false, tol_gap_abs=1e-10, tol_feas=1e-10, tol_gap_rel=0.0)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
     Cx = SparseMatrixCSC(kron(I(T_hor), prob.C_x))
     dx = kron(ones(T_hor), prob.b_x)
     cone = [Clarabel.NonnegativeConeT(size(Cx, 1))] # Sets all constraints to inequalities
@@ -483,7 +512,7 @@ function CommonSolve.init(prob::DynLQGame, ::Type{ADMMCLQGSolver};
 
     # Initialize projection on input space
     proj_U = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false, tol_gap_abs=1e-10, tol_feas=1e-10, tol_gap_rel=0.0)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
     Cu_loc = BlockDiagonal(map(Cu_i -> kron(I(T_hor), Cu_i), prob.C_loc_i))
     du_loc = vcat(map(bu_i -> kron(ones(T_hor), bu_i), prob.b_loc_i)...)
 
@@ -513,7 +542,7 @@ function CommonSolve.init(prob::DynLQGame, ::Type{ADMMCLQGSolver};
         zeros(prob.nx * T_hor), zeros(sum(prob.nu) * T_hor), # Primal vars init
         zeros(prob.nx * T_hor), zeros(sum(prob.nu) * T_hor), # Dual vars init
         zeros(prob.nx * T_hor), zeros(sum(prob.nu) * T_hor), # Aux vars init
-        ρ, params, Ref(:Initialized))
+        ρ, params, Ref(:Initialized), Ref(Inf))
 end
 
 function CommonSolve.step!(solver::ADMMCLQGSolver)
@@ -528,20 +557,20 @@ function CommonSolve.step!(solver::ADMMCLQGSolver)
 
     # Slack variable update
     Clarabel.update_q!(solver.proj_X, -(solver.x + solver.λ ./ solver.ρ))
-    results = Clarabel.solve!(solver.proj_X)
+    results = solveQPRobust(solver.proj_X)
     solver.z[:] = results.x
 
-    if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
-        solver.u = fill(NaN, length(solver.u))
+    if results.status == :Infeasible
+        solver.u[:] = fill(NaN, length(solver.u))
         solver.status[] = :Infeasible
         return solver
     end
 
     Clarabel.update_q!(solver.proj_U, -(solver.u + solver.μ ./ solver.ρ))
-    results = Clarabel.solve!(solver.proj_U)
+    results = solveQPRobust(solver.proj_U)
     solver.ω[:] = results.x
 
-    if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
+    if results.status == :Infeasible
         solver.x = NaN .* ones(solver.prob.n)
         solver.status[] = :Infeasible
         return solver
@@ -565,10 +594,17 @@ function CommonSolve.solve!(solver::ADMMCLQGSolver)
             break
         end
         res = compute_residual(solver.vi, solver.u)
-        if solver.params.verbose
-            println("[ADMMCLQGSolver] Residual = $res")
+        if k % 1000 == 0
+            if res > solver.last_res[] - solver.params.tol / 10
+                solver.status[] = :NoImprovement
+                @warn "[ADMMCLQGSolver::solve] Solution not improving, residual = $res"
+                break
+            end
+            solver.last_res[] = res
+            if solver.params.verbose
+                println("Iteration $k, Residual = $res")
+            end
         end
-        ((k % 100 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
         if res < solver.params.tol
             solver.status[] = :Solved
             break
@@ -641,9 +677,9 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     H_θ_x = SparseMatrixCSC(Matrix{Float64}(I(prob.n_θ + prob.n)))
     f_θ_x = zeros(prob.n_θ + prob.n)
     Clarabel.setup!(qp, H_θ_x, f_θ_x, A_θ_x, b_θ_x, cone, settings)
-    results = Clarabel.solve!(qp)
+    results = solveQPRobust(qp)
 
-    if results.status != Clarabel.SOLVED && results.status != Clarabel.ALMOST_SOLVED
+    if results.status == :Infeasible
         @warn("[ParametricDAQPSolver::init] Could not find a θ for which the mpAVI is feasible")
         return ParametricDAQPSolver(prob, options, Ref(:Infeasible), Vector{Int64}())
     end
