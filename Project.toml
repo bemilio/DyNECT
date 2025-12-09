@@ -1,6 +1,8 @@
 [deps]
 BlockArrays = "8e7c35d0-a365-5155-bbbb-fb81a777f24e"
 BlockDiagonals = "0a1fb500-61f7-11e9-3c65-f5ef3456f9f0"
+CommonSolve = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
+DAQP = "c47d62df-3981-49c8-9651-128b1cd08617"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MatrixEquations = "99c1a7ee-ab34-5fd5-8076-27c950a045f4"
 ParametricDAQP = "19f72acb-e2a9-45c8-96b9-4d5487c8db2e"

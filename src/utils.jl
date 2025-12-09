@@ -195,20 +195,20 @@ end
 function compute_residual(prob::AVI, x::AbstractVector)
     y = x - (prob.H * x + prob.f)
     #TODO: Switch to Clarabel
-    # proj = DAQP.Model()
-    # DAQP.setup(proj, Matrix{Float64}(I, prob.n, prob.n), -y, prob.A, prob.b, Float64[], zeros(Cint, prob.m))
-    # x_transf, _, _, _ = DAQP.solve(proj)
-    # r = norm(x - x_transf)
-    qp = Clarabel.Solver()
-    eye = spdiagm(0 => ones(Float64, prob.n))
-    settings = Clarabel.Settings(verbose=false)
-    cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
-    Clarabel.setup!(qp, eye, -y, prob.A, prob.b, cone, settings)
-    results = solveQPRobust(qp)
-    r = norm(x - results.x)
-    if results.status != :Solved
-        @warn "[compute_residual] QP solver returned $(results.status)"
-    end
+    proj = DAQP.Model()
+    DAQP.setup(proj, Matrix{Float64}(I, prob.n, prob.n), -y, Matrix{Float64}(prob.A), prob.b, Float64[], zeros(Cint, prob.m))
+    x_transf, _, _, _ = DAQP.solve(proj)
+    r = norm(x - x_transf)
+    # qp = Clarabel.Solver()
+    # eye = spdiagm(0 => ones(Float64, prob.n))
+    # settings = Clarabel.Settings(verbose=false)
+    # cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
+    # Clarabel.setup!(qp, eye, -y, prob.A, prob.b, cone, settings)
+    # results = solveQPRobust(qp)
+    # r = norm(x - results.x)
+    # if results.status != :Solved
+    #     @warn "[compute_residual] QP solver returned $(results.status)"
+    # end
     return r
 end
 
@@ -225,30 +225,4 @@ function setParameterSpace(mpavi::mpAVI;
     ub = isnothing(ub) ? mpavi.ub : ub
     lb = isnothing(lb) ? mpavi.lb : lb
     return mpAVI(mpavi.H, mpavi.F, mpavi.f, mpavi.A, mpavi.B, mpavi.b; C, d, ub, lb)
-end
-
-function solveQPRobust(qp::Clarabel.Solver)
-    results = Clarabel.solve!(qp)
-    if results.status == Clarabel.SOLVED
-        return (x=results.x, status=:Solved)
-    end
-    if results.status in (Clarabel.PRIMAL_INFEASIBLE,
-        Clarabel.DUAL_INFEASIBLE,
-        Clarabel.ALMOST_PRIMAL_INFEASIBLE,
-        Clarabel.ALMOST_DUAL_INFEASIBLE)
-        return (x=NaN .* results.x, status=:Infeasible)
-    end
-    if results.status != Clarabel.SOLVED
-        @warn "[DGSQPSolver] Clarabel returned $(results.status), trying with DAQP"
-        daqp = DAQP.Model()
-        DAQP.setup(daqp, Matrix{Float64}(qp.data.P), qp.data.q, Matrix{Float64}(qp.data.A), qp.data.b, Float64[], zeros(Cint, length(qp.data.b)))
-        x, _, exitflag, _ = DAQP.solve(daqp)
-        if exitflag > 0
-            return (x=x, status=:Solved)
-        elseif exitflag == -1
-            return (x=x, status=:Infeasible)
-        else
-            return (x=x, status=:Error)
-        end
-    end
 end

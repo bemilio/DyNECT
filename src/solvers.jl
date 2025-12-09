@@ -74,7 +74,6 @@ function CommonSolve.init(prob::AVI, ::Type{DouglasRachford}; Q=nothing, γ::Flo
     cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
     A = SparseMatrixCSC(prob.A)
     Clarabel.setup!(proj, M1plusQ, M2x_plus_f, A, prob.b, cone, settings)
-
     return DouglasRachford(prob, Q, M2, M2minusQ, M2plusQ, M2x_plus_f, proj, y, x, Ref(:Initialized), stepsize, params, Ref(Inf))
 end
 
@@ -82,8 +81,9 @@ function CommonSolve.step!(DR::DouglasRachford)
     DR.M2x_plus_f[:] = DR.prob.f
     mul!(DR.M2x_plus_f, DR.M2minusQ, DR.x, 1.0, 1.0)
     Clarabel.update_q!(DR.proj, DR.M2x_plus_f)
-    results = solveQPRobust(DR.proj)
-    if results.status == :Infeasible
+    results = Clarabel.solve!(DR.proj)
+    if results.status in (Clarabel.PRIMAL_INFEASIBLE,
+        Clarabel.DUAL_INFEASIBLE)
         DR.x[:] = NaN .* ones(length(DR.x))
         DR.status[] = :Infeasible
         return DR
@@ -317,17 +317,10 @@ function CommonSolve.step!(solver::DGSQPSolver)
     Clarabel.update_b!(solver.qp, -C)
     results = Clarabel.solve!(solver.qp)
     p_x = results.x
-    if results.status in (Clarabel.PRIMAL_INFEASIBLE,
-        Clarabel.DUAL_INFEASIBLE,
-        Clarabel.ALMOST_PRIMAL_INFEASIBLE,
-        Clarabel.ALMOST_DUAL_INFEASIBLE)
-
+    if results.status in (Clarabel.PRIMAL_INFEASIBLE, Clarabel.DUAL_INFEASIBLE)
         solver.x .= NaN .* ones(solver.prob.n)
         solver.status[] = :Infeasible
         return solver
-    end
-    if results.status != Clarabel.SOLVED
-        @warn "[DGSQPSolver] Clarabel returned $(results.status)"
     end
     # Dual update
     d = results.z # Dual variable of the QP
@@ -557,20 +550,20 @@ function CommonSolve.step!(solver::ADMMCLQGSolver)
 
     # Slack variable update
     Clarabel.update_q!(solver.proj_X, -(solver.x + solver.λ ./ solver.ρ))
-    results = solveQPRobust(solver.proj_X)
+    results = Clarabel.solve!(solver.proj_X)
     solver.z[:] = results.x
 
-    if results.status == :Infeasible
+    if results.status in (Clarabel.PRIMAL_INFEASIBLE, Clarabel.DUAL_INFEASIBLE)
         solver.u[:] = fill(NaN, length(solver.u))
         solver.status[] = :Infeasible
         return solver
     end
 
     Clarabel.update_q!(solver.proj_U, -(solver.u + solver.μ ./ solver.ρ))
-    results = solveQPRobust(solver.proj_U)
+    results = Clarabel.solve!(solver.proj_U)
     solver.ω[:] = results.x
 
-    if results.status == :Infeasible
+    if results.status in (Clarabel.PRIMAL_INFEASIBLE, Clarabel.DUAL_INFEASIBLE)
         solver.x = NaN .* ones(solver.prob.n)
         solver.status[] = :Infeasible
         return solver
@@ -677,7 +670,7 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     H_θ_x = SparseMatrixCSC(Matrix{Float64}(I(prob.n_θ + prob.n)))
     f_θ_x = zeros(prob.n_θ + prob.n)
     Clarabel.setup!(qp, H_θ_x, f_θ_x, A_θ_x, b_θ_x, cone, settings)
-    results = solveQPRobust(qp)
+    results = Clarabel.solve!(qp)
 
     if results.status == :Infeasible
         @warn("[ParametricDAQPSolver::init] Could not find a θ for which the mpAVI is feasible")

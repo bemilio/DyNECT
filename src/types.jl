@@ -289,7 +289,7 @@ struct AVI
         @assert size(H, 2) == n "[AVI constructor] H must be square"
         @assert length(f) == n "[AVI constructor] Length of f must match number of decision variables"
 
-        return new(SparseMatrixCSC(H), f, SparseMatrixCSC(A), b, n, m)
+        return new(H, f, A, b, n, m)
     end
 end
 
