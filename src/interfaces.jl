@@ -1,15 +1,15 @@
-using ParametricDAQP # For the mpVI type
+
+# ParametricDAQP Interface
 
 function find_CR(x0::Vector{Float64}, sol; eps_gap=1e-5)
     #Find the critical region for x0
-    contained_in = Int64[]
     for (ind, region) in enumerate(sol.CRs)
         violation = minimum(region.bth - region.Ath' * x0)
         if (violation >= -eps_gap)
-            push!(contained_in, ind)
+            return region
         end
     end
-    return isempty(contained_in) ? nothing : contained_in[1]
+    return nothing
 end
 
 function first_input_of_sequence(u::Vector{Float64}, nu::Vector{Int64}, N::Int64, T_hor::Int64)
@@ -22,10 +22,17 @@ function first_input_of_sequence(u::Vector{Float64}, nu::Vector{Int64}, N::Int64
     return u_first
 end
 
-function MPC_control(x0::Vector{Float64}, sol, nu::Vector{Int64}, N::Int64, T_hor::Int64)
-    ind = find_CR(x0, sol)
-    # Extract primal solution
-    u = sol.CRs[ind].z' * [x0; 1]
-    # Extract first input of each agent's sequence
+function evaluatePWA(sol::ParametricDAQP.Solution, θ::Vector{Float64})
+    θ_normalized = (θ - sol.translation) .* sol.scaling
+    CR = find_CR(θ_normalized, sol)
+    if !isnothing(CR)
+        return CR.z' * [θ_normalized; 1]
+    else
+        return nothing
+    end
+end
+
+function MPC_control(sol::ParametricDAQP.Solution, x0::Vector{Float64}, nu::Vector{Int64}, N::Int64, T_hor::Int64)
+    u = evaluatePWA(sol::ParametricDAQP.Solution, x0::Vector{Float64})
     return first_input_of_sequence(u, nu, N, T_hor)
 end

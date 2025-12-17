@@ -1,13 +1,9 @@
-using ParametricDAQP # For the mpVI type
-using BlockArrays
-using BlockDiagonals
-
 @doc raw"""
-    generate_mpVI(prob::DyNEP, T_hor::Int64)
-    Constructs the parametric variational inequality (mpVI) for a dynamic Nash equilibrium problem (DyNEP) over a finite prediction horizon.
+    DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
+    Constructs the parametric variational inequality (mpVI) for a dynamic Nash equilibrium problem (DynLQGame) over a finite prediction horizon.
 
 # Arguments
-- `prob::DyNEP`: Dynamic game structure containing system dynamics, cost, and constraints.
+- `prob::DynLQGame`: Dynamic game structure containing system dynamics, cost, and constraints.
 - `T_hor::Int64`: Prediction horizon.
 
 # Returns
@@ -23,7 +19,7 @@ The VI is of the form:
 ``H u + F x_0 + f``,  subject to  ``D u \leq E x_0 + d``
 where ``u`` is the stacked input sequence for all agents.
 """
-function generate_mpVI(prob::DyNEP, T_hor::Int64)
+function DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
     # Matrices defined as in Baghdalhorani, Benenati, Grammatico - Arxiv 2025
 
     # prediction model: x̅ = Θx₀+(∑ Γᵢu̅ᵢ) + c̅
@@ -78,7 +74,7 @@ function generate_mpVI(prob::DyNEP, T_hor::Int64)
         kron(ones(T_hor), prob.b_x) - C̅_x * c̅    # State constraints
         vcat([kron(ones(T_hor), prob.b_loc_i[i]) for i in 1:prob.N]...)] # Local input constraints
     # VI(H*x + F*x0 + f, D*x <= E*x0 + d)
-    return ParametricDAQP.MPVI(Matrix(H), F, f, D, E, d)
+    return mpAVI(Matrix{Float64}(H), F, f, D, E, d)
 end
 
 @doc raw"""
@@ -194,4 +190,39 @@ function is_detectable(A, C)
         end
     end
     return true
+end
+
+function compute_residual(prob::AVI, x::AbstractVector)
+    y = x - (prob.H * x + prob.f)
+    #TODO: Switch to Clarabel
+    proj = DAQP.Model()
+    DAQP.setup(proj, Matrix{Float64}(I, prob.n, prob.n), -y, Matrix{Float64}(prob.A), prob.b, Float64[], zeros(Cint, prob.m))
+    x_transf, _, _, _ = DAQP.solve(proj)
+    r = norm(x - x_transf)
+    # qp = Clarabel.Solver()
+    # eye = spdiagm(0 => ones(Float64, prob.n))
+    # settings = Clarabel.Settings(verbose=false)
+    # cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
+    # Clarabel.setup!(qp, eye, -y, prob.A, prob.b, cone, settings)
+    # results = solveQPRobust(qp)
+    # r = norm(x - results.x)
+    # if results.status != :Solved
+    #     @warn "[compute_residual] QP solver returned $(results.status)"
+    # end
+    return r
+end
+
+```
+Set the limits of the parameter space to an mpAVI
+```
+function setParameterSpace(mpavi::mpAVI;
+    C::Union{AbstractMatrix{Float64},Nothing}=nothing,
+    d::Union{AbstractVector{Float64},Nothing}=nothing,
+    ub::Union{AbstractVector{Float64},Nothing}=nothing,
+    lb::Union{AbstractVector{Float64},Nothing}=nothing)
+    C = isnothing(C) ? mpavi.C : C
+    d = isnothing(d) ? mpavi.d : d
+    ub = isnothing(ub) ? mpavi.ub : ub
+    lb = isnothing(lb) ? mpavi.lb : lb
+    return mpAVI(mpavi.H, mpavi.F, mpavi.f, mpavi.A, mpavi.B, mpavi.b; C, d, ub, lb)
 end

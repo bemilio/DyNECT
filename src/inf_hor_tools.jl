@@ -1,8 +1,6 @@
-using MatrixEquations
-using BlockDiagonals
 @enum method STEIN = 1
 
-function solveOLNE(game::DyNEP; method=STEIN, max_iter=1000, stepsize=0.1)
+function solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
     if any(norm(qi) > 1e-5 for qi in game.q) ||
        any(norm(ri) > 1e-5 for ri in game.r) ||
        norm(game.c) > 1e-5
@@ -71,7 +69,7 @@ function solveOLNE(game::DyNEP; method=STEIN, max_iter=1000, stepsize=0.1)
     return P, Ki
 end
 
-function solveExtendedARE(game::DyNEP, K::Vector{<:AbstractMatrix})
+function solveExtendedARE(game::DynLQGame, K::Vector{<:AbstractMatrix})
     nx = game.nx
     P_ext = [zeros(2 * nx, 2 * nx) for _ in 1:game.N]
     K_ext = [zeros(nu, 2 * nx) for nu in game.nu]

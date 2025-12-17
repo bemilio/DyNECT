@@ -4,6 +4,24 @@ using LinearAlgebra
 using ParametricDAQP
 using BlockArrays
 using MatrixEquations
+using CommonSolve
+
+
+@testset "DouglasRachford.jl" begin
+    n = 2
+    # [ 1 1      [-1  
+    #  -1 1] x +   1] = 0
+    # solution: [1;0]
+    H = [1. 1.; -1. 1.]
+    f = [-1., 1.]
+    A = zeros(0, n)
+    b = zeros(0)
+    avi = DyNECT.AVI(H, f, A, b)
+    solution = CommonSolve.solve(avi, DyNECT.DouglasRachford; verbose=true)
+    tol = 1e-4
+    @test norm(solution - [1., 0.]) < tol
+
+end
 
 
 @testset "generate_prediction_model.jl" begin
@@ -24,7 +42,7 @@ using MatrixEquations
     @test norm(Γi[j][end-nx+1:end, 1:nu[j]] - A^(T_hor - 1) * Bi[j]) < tol
 end
 
-@testset "generate_mpVI.jl" begin
+@testset "DynLQGame2mpAVI.jl" begin
     using Random
     Random.seed!(1)
 
@@ -57,7 +75,7 @@ end
     C_u_vec = [rand(mu, nu[i]) for i in 1:N]
     b_u = rand(mu)
 
-    prob = DyNEP(
+    prob = DynLQGame(
         A=A,
         Bvec=Bvec,
         Q=Q,
@@ -70,7 +88,7 @@ end
         C_u_vec=C_u_vec,
         b_u=b_u)
 
-    mpVI = generate_mpVI(prob, T_hor)
+    mpVI = DynLQGame2mpAVI(prob, T_hor)
 
 end
 
@@ -106,7 +124,7 @@ end
     C_u_vec = [zeros(0, nu[i]) for i in 1:N]
     b_u = zeros(0)
 
-    prob = DyNEP(
+    prob = DynLQGame(
         A=A,
         Bvec=Bvec,
         Q=Q,
@@ -134,7 +152,7 @@ end
     @test err_P < 1e-5
 
     # Generate and solve mpVI
-    mpVI = generate_mpVI(prob, T_hor)
+    mpVI = DynLQGame2mpAVI(prob, T_hor)
     useq, _ = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x; 1], mpVI.A, mpVI.B' * [x; 1])
     solution_found = !isnothing(useq)
     if solution_found
@@ -174,7 +192,7 @@ end
     C_u_vec = [zeros(0, nu[1])]
     b_u = zeros(0)
 
-    prob = DyNEP(
+    prob = DynLQGame(
         A=A,
         Bvec=B,
         Q=Q,
@@ -187,7 +205,7 @@ end
         C_u_vec=C_u_vec,
         b_u=b_u)
 
-    mpVI = generate_mpVI(prob, T_hor)
+    mpVI = DynLQGame2mpAVI(prob, T_hor)
     x = rand(nx)
     u_avi_all, _ = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x; 1], mpVI.A, mpVI.B' * [x; 1])
     u_avi = DyNECT.first_input_of_sequence(u_avi_all, nu, N, T_hor)

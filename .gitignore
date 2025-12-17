@@ -2,3 +2,13 @@
 .vscode/launch.json
 /docs/build
 pv_imp_results.csv
+*.csv
+*.jls
+*.mat
+/src/python/DGSQP/venv
+/src/python/DGSQP/DGSQP/tracks/__pycache__
+/src/python/DGSQP/DGSQP/solvers/__pycache__
+/src/python/DGSQP/DGSQP/dynamics/__pycache__
+/src/python/DGSQP/DGSQP/__pycache__
+/src/python
+/.CondaPkg

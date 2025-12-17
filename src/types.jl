@@ -1,8 +1,8 @@
 
 @doc raw"""
-DyNEP
+DynLQGame
 
-Dynamic Nash Equilibrium Problem (DyNEP) structure.
+Dynamic Nash Equilibrium Problem (DynLQGame) structure.
 The linear dynamics are given by the equation:
 ```math
     x^+ = A x + \sum_i(B_i u_i) + c
@@ -13,7 +13,7 @@ The objective for agent i is
     \sum_{j\neq i}\left(\langle u_i[t], R_{ij}u_j[t]\rangle\right) + \langle x[t], q_t\rangle + \langle u_i[t], r_i\rangle \right\}
 ``` 
 # Constructor
-`DyNEP(;
+`DynLQGame(;
     A::Matrix{Float64},
     Bvec::Vector{Matrix{Float64}},
     c::Vector{Float64},
@@ -52,7 +52,7 @@ The objective for agent i is
 - `C_u_i::Vector{SubArray{Float64,2}}`: Views on `C_u` for each agent, each size mˢʰ⨯nᵤⁱ
 - `m_u::Int64`: Number of shared input constraints.
 """
-struct DyNEP # Dynamic Nash equilibrium problem
+struct DynLQGame # Dynamic Nash equilibrium problem
     nx::Int64
     nu::Vector{Int64}
     N::Int64
@@ -85,7 +85,7 @@ struct DyNEP # Dynamic Nash equilibrium problem
     C_u_i::Vector{SubArray{Float64,2}} # Views on C_u
     m_u::Int64 # number of input constraints
 
-    function DyNEP(;
+    function DynLQGame(;
         A::Matrix{Float64},
         Bvec::Vector{Matrix{Float64}},
         c::Union{Nothing,Vector{Float64}}=nothing, # Defaults to 0
@@ -202,3 +202,115 @@ struct DyNEP # Dynamic Nash equilibrium problem
     end
 end
 
+
+struct mpAVI
+    # VI(Hx + Fθ + f, Ax ≤ Bθ + b)
+    # With θ ∈ { Cθ ≤ d } ∩ { lb ≤ θ ≤ ub }
+    H::AbstractMatrix # size = n_x * n_x
+    F::AbstractMatrix # size =  n_x * n_θ
+    f::AbstractVector # size =  n_x
+    A::AbstractMatrix # size = n_constr * n_x
+    B::AbstractMatrix # size = n_constr * n_θ 
+    b::AbstractVector # size = n_constr
+    C::AbstractMatrix
+    d::AbstractVector
+    ub::AbstractVector
+    lb::AbstractVector
+    n::Int
+    m::Int
+    n_θ::Int
+
+    function mpAVI(
+        H::AbstractMatrix{Float64},
+        F::AbstractMatrix{Float64},
+        f::AbstractVector{Float64},
+        A::AbstractMatrix{Float64},
+        B::AbstractMatrix{Float64},
+        b::AbstractVector{Float64};
+        C::Union{AbstractMatrix{Float64},Nothing}=nothing,
+        d::Union{AbstractVector{Float64},Nothing}=nothing,
+        ub::Union{AbstractVector{Float64},Nothing}=nothing,
+        lb::Union{AbstractVector{Float64},Nothing}=nothing,
+    )
+        n_θ = size(F, 2)
+        n = size(H, 1)
+        m = size(A, 1)  # Number of constraints
+
+        if isnothing(C) || isnothing(d)
+            # Default to infinitely large box constraints
+            C = zeros(0, n_θ)
+            d = zeros(0)
+        end
+        if isnothing(ub)
+            ub = 100 .* ones(n_θ)
+        end
+        if isnothing(lb)
+            lb = -100 .* ones(n_θ)
+        end
+
+        # Sanity checks
+        @assert size(A, 2) == n "[MPVI constructor] Columns of A ($(size(A, 2))) must equal number of decision variables ($n)"
+        @assert size(B, 1) == m "[MPVI constructor] Rows of B ($(size(B, 1))) must match rows of A ($m)"
+        @assert length(b) == m "[MPVI constructor] Length of b ($(length(b))) must match rows of A ($m)"
+        @assert size(F, 1) == n "[MPVI constructor] F has $(size(F, 1)) rows. It must be equal to the number of decision variables ($n)"
+        @assert size(H, 2) == n "[MPVI constructor] H must be square"
+        @assert length(f) == n "[MPVI constructor] Length of f ($(length(f))) must match number of decision variables ($n)"
+        @assert size(C, 2) == n_θ "[MPVI constructor] C has $(size(C, 2)) columns. It must be equal to the number of parameters ($n_θ)"
+        @assert length(d) == size(C, 1) "[MPVI constructor] C has $(size(C, 1)) rows. It must be equal to the size of d ($d)"
+
+        return new(H, F, f, A, B, b, C, d, ub, lb, n, m, n_θ)
+    end
+end
+
+
+
+struct AVI
+    # VI(Hx + f, Ax <= b)
+    # where f, b are the last rows of F,B, respect.
+    H::AbstractMatrix # size = n_x * n_x
+    f::AbstractVector # size =  n_x
+    A::AbstractMatrix # size = n_constr * n_x
+    b::AbstractVector # size = n_constr
+    n::Int
+    m::Int
+
+    function AVI(
+        H::AbstractMatrix{Float64},
+        f::AbstractVector{Float64},
+        A::AbstractMatrix{Float64},
+        b::AbstractVector{Float64}
+    )
+        n = size(H, 1)
+        m = size(A, 1)  # Number of constraints
+
+        # Sanity checks
+        @assert size(A, 2) == n "[AVI constructor] Columns of A must equal number of decision variables"
+        @assert length(b) == m "[AVI constructor] Length of b must match rows of A"
+        @assert size(H, 2) == n "[AVI constructor] H must be square"
+        @assert length(f) == n "[AVI constructor] Length of f must match number of decision variables"
+
+        return new(H, f, A, b, n, m)
+    end
+end
+
+function AVI(mpAVI::mpAVI, θ::AbstractVector)
+    return AVI(mpAVI.H, mpAVI.F * θ + mpAVI.f, mpAVI.A, mpAVI.B * θ + mpAVI.b)
+end
+
+mutable struct IterativeSolverParams
+    max_iter::Int
+    stepsize::Union{Float64,Nothing}
+    tol::Float64
+    warmstart::Symbol
+    verbose::Bool
+    time_limit::Float64
+end
+
+function IterativeSolverParams(; max_iter::Int=10000,
+    stepsize::Union{Float64,Nothing}=nothing,
+    tol::Float64=1e-6,
+    warmstart::Symbol=:NoWarmStart,
+    verbose::Bool=false,
+    time_limit::Float64=1e2)
+    return IterativeSolverParams(max_iter, stepsize, tol, warmstart, verbose, time_limit)
+end
