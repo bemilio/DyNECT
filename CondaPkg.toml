@@ -1,5 +1,0 @@
-[deps]
-python = "3.12.*"
-
-[pip.deps]
-dgsqp = "@./src/python/DGSQP"
