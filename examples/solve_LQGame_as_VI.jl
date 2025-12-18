@@ -67,7 +67,7 @@ pDAQP_res = DyNECT.compute_residual(avi, pDAQP_sol)
 println("Solution residual pDAQP (explicit) = $pDAQP_res")
 
 
-params = DyNECT.IterativeSolverParams(verbose=true, time_limit=1e-3)
+params = DyNECT.IterativeSolverParams(verbose=true, time_limit=10.0)
 
 DR_sol = CommonSolve.solve(avi, DyNECT.DouglasRachford; params=params)
 println("Solution residual DR = $(DR_sol.residual)")
@@ -80,55 +80,3 @@ println("Solution residual DGSQP = $(DGSQP_sol.residual)")
 
 monviso_sol = CommonSolve.solve(avi, DyNECT.MonvisoSolver; method=:pg, params=params)
 println("Solution residual monviso = $(monviso_sol.residual)")
-
-
-
-
-#TODO: Turn the comparison between multi-parametric solution and explicit solution into test
-
-# ## Test solution
-# tol = 10^(-5)
-# all_good = true
-# for i in 1:100
-#     x0_test = 2 * ones(game.nx) - rand(game.nx)
-#     # Check if x0_test is in Θ
-#     if any(Θ.A' * x0_test .> Θ.b) || any(x0_test .> Θ.ub) || any(x0_test .< Θ.lb)
-#         @warn "x0_test is outside of Θ"
-#         continue
-#     end
-#     usol = evaluate_solution(sol, x0_test)
-#     # θ_normalized = (x0_test - sol.translation) .* sol.scaling
-#     # all_CRs_indexes = ParametricDAQP.pointlocation(θ_normalized, sol.CRs)
-#     # if !isempty(all_CRs_indexes)
-#     #     CR = sol.CRs[all_CRs_indexes[1]]
-#     #     usol = CR.z' * [θ_normalized; 1]
-#     # end
-#     # @infiltrate
-#     uref, res, solved_implicit = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x0_test; 1], mpVI.A, mpVI.B' * [x0_test; 1], tol=tol)
-#     if isnothing(usol) && solved_implicit
-#         @warn "The explicit solution is infeasible, while the implicit solution is feasible"
-#         println("Residual implicit = $res")
-#         println("x0 = $x0_test")
-#         global all_good = false
-#     end
-#     if !isnothing(usol) && !solved_implicit
-#         @warn "The Implicit solution is infeasible, while the Explicit solution is feasible"
-#         global all_good = false
-#     end
-#     if isnothing(usol) && !solved_implicit
-#         println("Both explicit and implicit solution are infeasible")
-#     end
-#     if !isnothing(usol) && solved_implicit && norm(uref - usol) > tol
-#         @warn "Explicit and implicit solutions are different"
-#         global all_good = false
-#     end
-
-
-# end
-# if all_good
-#     println("Explicit and implicit solutions are equal in all tested cases")
-# end
-
-# # Plot partitions
-
-# display(ParametricDAQP.plot_regions(sol))
