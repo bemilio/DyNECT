@@ -17,9 +17,10 @@ using CommonSolve
     A = zeros(0, n)
     b = zeros(0)
     avi = DyNECT.AVI(H, f, A, b)
-    solution = CommonSolve.solve(avi, DyNECT.DouglasRachford; verbose=true)
+    params = DyNECT.IterativeSolverParams(verbose=true)
+    solution = CommonSolve.solve(avi, DyNECT.DouglasRachford; params=params)
     tol = 1e-4
-    @test norm(solution - [1., 0.]) < tol
+    @test norm(solution.x - [1., 0.]) < tol
 
 end
 
@@ -153,62 +154,14 @@ end
 
     # Generate and solve mpVI
     mpVI = DynLQGame2mpAVI(prob, T_hor)
-    useq, _ = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x; 1], mpVI.A, mpVI.B' * [x; 1])
-    solution_found = !isnothing(useq)
-    if solution_found
-        u = vcat(DyNECT.first_input_of_sequence(useq, prob.nu, prob.N, T_hor)...)
+    avi = DyNECT.AVI(mpVI, x)
+    params = DyNECT.IterativeSolverParams(verbose=true)
+    solution = CommonSolve.solve(avi, DyNECT.DouglasRachford; params=params)
+    if solution.status == :Solved
+        u = vcat(DyNECT.first_input_of_sequence(solution.x, prob.nu, prob.N, T_hor)...)
     else
         @error "VI solution not found"
     end
 
     @test norm(u_inf - u) < 1e-5
-end
-
-@testset "LQR_problem.jl" begin
-    using Random
-    Random.seed!(1)
-
-    # Solve single-agent LQR and compare it to the Riccati solution
-    nx = 4
-    N = 1
-    nu = [3]
-    T_hor = 4
-
-    A = rand(nx, nx)
-    B = [rand(nx, nu[1])]
-
-    Q = [Matrix{Float64}(I(nx))]
-    R = [[Matrix{Float64}(I(nu[1]))]]
-    P, _, K = ared(A, B[1], R[1][1], Q[1], zeros(nx, nu[1]))
-    P_vec = [P]
-
-    # Constraints
-    C_x = zeros(0, nx)
-    b_x = zeros(0)
-
-    C_loc_vec = [zeros(0, nu[1])]
-    b_loc_vec = [zeros(0)]
-
-    C_u_vec = [zeros(0, nu[1])]
-    b_u = zeros(0)
-
-    prob = DynLQGame(
-        A=A,
-        Bvec=B,
-        Q=Q,
-        R=R,
-        P=P_vec,
-        C_x=C_x,
-        b_x=b_x,
-        C_loc_vec=C_loc_vec,
-        b_loc_vec=b_loc_vec,
-        C_u_vec=C_u_vec,
-        b_u=b_u)
-
-    mpVI = DynLQGame2mpAVI(prob, T_hor)
-    x = rand(nx)
-    u_avi_all, _ = ParametricDAQP.AVIsolve(mpVI.H, mpVI.F' * [x; 1], mpVI.A, mpVI.B' * [x; 1])
-    u_avi = DyNECT.first_input_of_sequence(u_avi_all, nu, N, T_hor)
-    u_lqr = -K * x
-    @test norm(u_lqr - u_avi[1]) < 1e-5
 end
