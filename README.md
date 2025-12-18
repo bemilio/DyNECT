@@ -12,9 +12,9 @@
 - Collection of state-of-the-art iterative and explicit solvers for open-loop dynamic games  
 - Utility tools for streamlined implementation of game-theoretic MPC
 - Automatic reformulation of LQ games as (multi-parametric) Variational Inequalities (VIs)
-- Iterative solution of coupled Riccati equations arising in unconstrained infinite-horizon games  
-- Integration with [Monviso](https://github.com/nicomignoni/Monviso.jl) for access to multiple VI solvers
-- Integration with [pDAQP](https://github.com/darnstrom/ParametricDAQP.jl/pull/19) for offline computation of state-to-solution map, enabling fast online control  control
+- Solution of coupled Riccati equations arising in unconstrained infinite-horizon games  
+- Integration with [Monviso](https://github.com/nicomignoni/Monviso.jl) for access to multiple VI solution algorithms
+- Integration with [pDAQP](https://github.com/darnstrom/ParametricDAQP.jl/pull/19) for offline precomputation of state-to-solution map, enabling fast online control
 - Unified solver access through the  [CommonSolve.jl](https://github.com/SciML/CommonSolve.jl) interface
 
 ## Installation
@@ -35,9 +35,9 @@ The example in `examples/solve_LQGame_as_VI.jl`:
 - Given an initial state, converts the multi-parametric VI into a VI
 - Solves the VI via several iterative algorithms
 
-Additional examples can be found at [this link](https://github.com/bemilio/scripts_for_explicit_LQGames_paper/tree/main/examples). 
+Additional examples can be found at [this link](https://github.com/bemilio/scripts_for_explicit_LQGames_paper). 
 
-For details on the LQ game-to-VI conversion, as well as a performance comparison between some implemented solvers, see
+For details on the LQ game-to-VI conversion, as well as a performance comparison between some available algorithms, see
 
 [_The explicit game-theoretic linear quadratic
 regulator for constrained multi-agent systems_ E. Benenati, G. Belgioioso, 2025](https://arxiv.org/pdf/2512.07749)
