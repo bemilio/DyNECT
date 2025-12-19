@@ -11,13 +11,13 @@ A **linear quadratic (LQ) game** is a multi-agent control problem, where each de
 ```math
 x^{k+1} = A x^k + \sum_{i=1}^N \left(B_i u^k_i\right) + c,
 ```
-and optimizes the quadratic performance metric
+and optimizes a quadratic performance metric
 ```math
-J_i(u_i, u_{-i}) =  \frac{1}{2} (x^T)^\top P_i x^T + p_i^{\top} x^T + \sum_{k=0}^{T-1}
-\left(\frac{1}{2}(x^k)^\top Q_i x^k + q_i^{\top} x^k 
-+ \frac{1}{2}(u_{j}^k)^\top R_{ii} u_{i}^k + r_i^{\top} u_i^k +  \sum_{j\neq i}^N (u_{j}^k)^\top R_{ij} u_{j}^k\right),
+J_i(u_i, u_{-i}) =  \frac{1}{2} (x^T)^\top P_i x^T + \sum_{k=0}^{T-1}
+\left(\frac{1}{2}(x^k)^\top Q_i x^k 
++ \frac{1}{2}(u_{j}^k)^\top R_{i} u_{i}^k \right),
 ```
-where $P_i, p_i, Q_i, q_i, r_i, R_{i1}, \dots, R_{iN}$ are the weights of the optimization problem for agent $i$, and $u_{-i}$ is the collection of inputs that belong to agents _other_ than $i$, namely, $u_{-i}=(u_j)_{j\neq i}$.  
+where $P_i, Q_i,, R_{i}$ are the weights of the optimization problem for agent $i$, and $u_{-i}$ is the collection of inputs that belong to agents _other_ than $i$, namely, $u_{-i}=(u_j)_{j\neq i}$.  
 **DyNECT** helps you find the open-loop Nash equilibrium of the game, that is, the input sequences $`(u_1^*,..., u_N^*)`$ such that
 ```math
 J_i(u^*_i, u^*_{-i}) \in \arg\min_{u_i} J_i(u_i, u^*_{-i}).
@@ -25,13 +25,12 @@ J_i(u^*_i, u^*_{-i}) \in \arg\min_{u_i} J_i(u_i, u^*_{-i}).
 
 **DyNECT** supports state constraints, local input constraints and shared input constraints of the kind
 
-```math
-\begin{aligned}
-C^{\text x} x^k &\leq b^{\text x}, \\
-C^{\text{loc}}_i u_i^k &\leq b^{\text{loc}}_i, \quad \forall i, \\
+
+$$`\begin{aligned}
+C^{\text x} x^k &\leq b^{\text x}\\
+C^{\text{loc}}_i u_i^k &\leq b^{\text{loc}}_i \quad \forall i\\
 \sum_i C^{\text u} u_i^k &\leq b^{\text u}.
-\end{aligned}
-```
+\end{aligned}`$$
 
 Many functionalities of DyNECT are based on reformulating the dynamic game into the affine variational inequality (AVI)
 ```math
