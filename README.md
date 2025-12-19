@@ -26,11 +26,13 @@ J_i(u^*_i, u^*_{-i}) \in \arg\min_{u_i} J_i(u_i, u^*_{-i}).
 **DyNECT** supports state constraints, local input constraints and shared input constraints of the kind
 
 
-$$`\begin{aligned}
-C^{\text x} x^k &\leq b^{\text x}\\
-C^{\text{loc}}_i u_i^k &\leq b^{\text{loc}}_i \quad \forall i\\
-\sum_i C^{\text u} u_i^k &\leq b^{\text u}.
-\end{aligned}`$$
+```math
+\begin{aligned}
+&C^{\text x} x^k \leq b^{\text x}\\
+&C^{\text{loc}}_i u_i^k \leq b^{\text{loc}}_i \quad \forall i\\
+&\sum_i C^{\text u} u_i^k \leq b^{\text u}.
+\end{aligned}
+```
 
 Many functionalities of DyNECT are based on reformulating the dynamic game into the affine variational inequality (AVI)
 ```math
