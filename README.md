@@ -65,10 +65,10 @@ regulator for constrained multi-agent systems_ E. Benenati, G. Belgioioso, 2025]
 
 ## Installation
 
-DyNECT depends on a development fork of 'ParametricDAQP.jl'. From the Julia REPL:
+DyNECT depends on 'ParametricDAQP.jl', which is not in the general registry. From the Julia REPL:
 
 ```sh
-] add https://github.com/bemilio/ParametricDAQP.jl#mpVI
+] add https://github.com/darnstrom/ParametricDAQP.jl
 ] add https://github.com/bemilio/DyNECT.git
 ```
 
