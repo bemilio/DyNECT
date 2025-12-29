@@ -290,7 +290,9 @@ function CommonSolve.init(prob::AVI, ::Type{DGSQPSolver}; max_watchdog_iter::Int
     regularization = 0.1
     B = SparseMatrixCSC((prob.H + prob.H') / 2 + regularization * I(prob.n))
     qp = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false,
+                                 chordal_decomposition_enable=false)
+
 
     cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
     A = SparseMatrixCSC(prob.A)
