@@ -70,7 +70,7 @@ function CommonSolve.init(prob::AVI, ::Type{DouglasRachford}; Q=nothing, γ::Flo
 
     # Compute projection operator
     proj = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false, chordal_decomposition_enable=false)
     cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
     A = SparseMatrixCSC(prob.A)
     Clarabel.setup!(proj, M1plusQ, M2x_plus_f, A, prob.b, cone, settings)
@@ -497,7 +497,7 @@ function CommonSolve.init(prob::DynLQGame, ::Type{ADMMCLQGSolver};
 
     # Initialize projection on state space
     proj_X = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false, chordal_decomposition_enable=false)
     Cx = SparseMatrixCSC(kron(I(T_hor), prob.C_x))
     dx = kron(ones(T_hor), prob.b_x)
     cone = [Clarabel.NonnegativeConeT(size(Cx, 1))] # Sets all constraints to inequalities
@@ -507,7 +507,7 @@ function CommonSolve.init(prob::DynLQGame, ::Type{ADMMCLQGSolver};
 
     # Initialize projection on input space
     proj_U = Clarabel.Solver()
-    settings = Clarabel.Settings(verbose=false, presolve_enable=false)
+    settings = Clarabel.Settings(verbose=false, presolve_enable=false, chordal_decomposition_enable=false)
     Cu_loc = BlockDiagonal(map(Cu_i -> kron(I(T_hor), Cu_i), prob.C_loc_i))
     du_loc = vcat(map(bu_i -> kron(ones(T_hor), bu_i), prob.b_loc_i)...)
 
