@@ -12,3 +12,4 @@ pv_imp_results.csv
 /src/python/DGSQP/DGSQP/__pycache__
 /src/python
 /.CondaPkg
+/python

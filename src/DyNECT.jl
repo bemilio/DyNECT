@@ -6,6 +6,9 @@ using LinearAlgebra, SparseArrays, MatrixEquations, BlockDiagonals, BlockArrays,
 # External solvers
 using DAQP, Clarabel, JuMP, Monviso, ParametricDAQP
 
+# Automatic differentiation
+using Zygote
+
 
 # CommonSolve
 
@@ -16,7 +19,7 @@ include("interfaces.jl")
 
 using CommonSolve
 include("solvers.jl")
-export DynLQGame, DynLQGame2mpAVI
+export DynLQGameTI, DynLQGameTV, DynLQGame2mpAVI
 export solve
 
 end

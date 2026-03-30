@@ -76,7 +76,7 @@ end
     C_u_vec = [rand(mu, nu[i]) for i in 1:N]
     b_u = rand(mu)
 
-    prob = DynLQGame(
+    prob = DynLQGameTI(
         A=A,
         Bvec=Bvec,
         Q=Q,
@@ -125,7 +125,7 @@ end
     C_u_vec = [zeros(0, nu[i]) for i in 1:N]
     b_u = zeros(0)
 
-    prob = DynLQGame(
+    prob = DynLQGameTI(
         A=A,
         Bvec=Bvec,
         Q=Q,

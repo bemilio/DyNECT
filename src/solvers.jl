@@ -424,12 +424,12 @@ function CommonSolve.solve!(solver::DGSQPSolver)
 end
 
 
-#### DynLQGame solvers ####
+#### DynLQGameTI solvers ####
 
 # ADMM-CLQG
 struct ADMMCLQGSolver
     # Stored quantities
-    prob::DynLQGame
+    prob::DynLQGameTI
     vi::AVI
     mpvi::mpAVI
     mpvi_reg::mpAVI
@@ -466,7 +466,7 @@ function update_x0!(solver::ADMMCLQGSolver, x0::Vector{Float64})
     f[:] = AVI(solver.mpvi_reg, x0).f
 end
 
-function CommonSolve.init(prob::DynLQGame, ::Type{ADMMCLQGSolver};
+function CommonSolve.init(prob::DynLQGameTI, ::Type{ADMMCLQGSolver};
     T_hor::Union{Int,Nothing}=nothing,
     x0::Union{AbstractVector,Nothing}=nothing,
     ρ::Float64=0.5,
