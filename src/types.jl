@@ -19,24 +19,24 @@ end
 function LQapprox(game::DynGame, u::Vector{Vector{Vector{Float64}}}, x0::Vector{Float64}, T_hor::Int64)
     xt = copy(x0)
     A =  [Matrix{Float64}(undef, game.nx, game.nx) for _ in 1:T_hor]
-    Bi = [[Matrix{Float64}(undef, game.nx, nui) for nui in game.nu] for _ in 1:T_hor]
+    B = [[Matrix{Float64}(undef, game.nx, nui) for nui in game.nu] for _ in 1:T_hor]
     Cx = [Matrix{Float64}(undef, game.mx, game.nx) for _ in 1:T_hor]
     bx = [Vector{Float64}(undef, game.mx) for _ in 1:T_hor]
     Cu = [[Matrix{Float64}(undef, game.mu, nui) for nui in game.nu] for _ in 1:T_hor]
     bu = [Vector{Float64}(undef, game.mu) for _ in 1:T_hor]
     Cloc = [[Matrix{Float64}(undef, game.mloc[i], game.nu[i]) for i in 1:game.N] for _ in 1:T_hor]
     bloc = [[Vector{Float64}(undef, mi) for mi in game.mloc] for _ in 1:T_hor]
-    Q = [[Matrix{Float64}(undef, game.nx, game.nx) for i in 1:game.N] for _ in 1:T_hor]
+    Q = [[Matrix{Float64}(undef, game.nx, game.nx) for i in 1:game.N] for _ in 1:T_hor-1]
     R = [[[Matrix{Float64}(undef, game.nu[i], game.nu[j]) for j in 1:game.N] for i in 1:game.N] for _ in 1:T_hor]
-    q = [[Vector{Float64}(undef, game.nx) for _ in 1:game.N] for _ in 1:T_hor]
+    q = [[Vector{Float64}(undef, game.nx) for _ in 1:game.N] for _ in 1:T_hor-1]
     r = [[Vector{Float64}(undef, game.nu[i]) for i in 1:game.N] for _ in 1:T_hor]
 
 
-    for t=1:T_hor-1
+    for t=1:T_hor
         # Linearize dynamics
         Jac_f_t = Zygote.jacobian(game.f, xt, u[t]...)
         A[t] .= Jac_f_t[1]
-        Bi[t] .= Jac_f_t[2:end]
+        B[t] .= Jac_f_t[2:end]
         
         # Linearize state constraints
         Cx[t] .= Zygote.jacobian(game.gx, xt)[1]
@@ -53,11 +53,16 @@ function LQapprox(game::DynGame, u::Vector{Vector{Vector{Float64}}}, x0::Vector{
         # Quadratize objectives
         for i=1:game.N
             H, Hij = block_hessian(game.J[i], xt, u[t]...)
-            Q[t][i] .= Hij[(1,1)]
+            # t>=2 && println("size of Qti = $(Q[t-1][i])")
+            if t>=2
+                Q[t-1][i] .= Hij[(1,1)]
+            end
             R[t][i] .= [Hij[(1+i, 1+j)] for j in 1:game.N] # Hessian with respect to ui, uj
 
             grad_Ji = Zygote.gradient(game.J[i], xt, u[t]...) 
-            q[t][i] = grad_Ji[1]
+            if t>=2
+                q[t-1][i] .= grad_Ji[1]
+            end
             r[t][i] = grad_Ji[i+1]
         end
 
@@ -67,7 +72,7 @@ function LQapprox(game::DynGame, u::Vector{Vector{Vector{Float64}}}, x0::Vector{
 
     LQgame = DynLQGameTV(
         A=A,
-        B=Bi,
+        B=B,
         Q=Q,
         R=R,
         q=q, # Defaults to 0
@@ -119,7 +124,7 @@ The objective for agent i is
 - `N::Int64`: Number of agents.
 - `A::Matrix{Float64}`: State transition matrix.
 - `B::Matrix{Float64}`: Input matrix (horizontally concatenated for all agents).
-- `Bi::Vector{SubArray{Float64,2}}`: Views on `B` for each agent.
+- `B::Vector{SubArray{Float64,2}}`: Views on `B` for each agent.
 - `Q::Vector{Matrix{Float64}}`: State cost matrices for each agent, size nₓ×nₓ.
 - `R::Vector{Vector{Matrix{Float64}}}`: Input cost matrix, the i,j-th element is size nᵤⁱ×nᵤʲ.
 - `P::Vector{Matrix{Float64}}`: Terminal cost matrices for each agent, size nₓ×nₓ.
@@ -142,8 +147,7 @@ struct DynLQGameTI # Dynamic time-invariant Nash equilibrium problem
     N::Int64
     ## Control problem quantities
     A::Matrix{Float64}
-    B::Matrix{Float64} # B = [Bi[1], Bi[2], ...]
-    Bi::Vector{SubArray{Float64,2}} # Views on B
+    B::Vector{Matrix{Float64}} 
     c::Vector{Float64}
     Q::Vector{Matrix{Float64}}
     R::Vector{Vector{Matrix{Float64}}}
@@ -159,7 +163,7 @@ struct DynLQGameTI # Dynamic time-invariant Nash equilibrium problem
     m_x::Int64 # number of state constraints
     # Local input constraints in the form C_loc*u <= b_loc
     C_loc::Matrix{Float64} # C_loc = diag(C_loc_i[1], C_loc_i[2], ...)
-    b_loc::Vector{Float64} # b_loc = [b_loc_i[1], b_loc_i[2], ...]
+    b_loc::Vector{Float64} # b_loc = [b_loc_i[1], b_loc_i[2], ...] 
     C_loc_i::Vector{SubArray{Float64,2}} # Views on C_loc
     b_loc_i::Vector{SubArray{Float64,1}} # Views on b_loc
     m_loc::Vector{Int64} # Number of local constraints per each agent
@@ -171,7 +175,7 @@ struct DynLQGameTI # Dynamic time-invariant Nash equilibrium problem
 
     function DynLQGameTI(; # Constructor for time-invariant game
         A::Matrix{Float64},
-        Bvec::Vector{Matrix{Float64}},
+        B::Vector{Matrix{Float64}},
         c::Union{Nothing,Vector{Float64}}=nothing, # Defaults to 0
         Q::Vector{Matrix{Float64}},
         R::Vector{Vector{Matrix{Float64}}},
@@ -189,14 +193,14 @@ struct DynLQGameTI # Dynamic time-invariant Nash equilibrium problem
 
         ## Extract sizes
         nx = size(A, 1)
-        nu = map(x -> size(x, 2), Bvec)
-        N = length(Bvec)
+        nu = map(x -> size(x, 2), B)
+        N = length(B)
         m_x = size(C_x, 1)
         m_loc = map(x -> size(x, 1), C_loc_vec)
 
         ## Dimensionality checks
         @assert size(A, 1) == size(A, 2) "A must be square (nx × nx)"
-        @assert all(size(B_i, 1) == nx for B_i in Bvec) "Each matrix B_i in Bvec must have nx rows"
+        @assert all(size(B_i, 1) == nx for B_i in B) "Each matrix B_i in B must have nx rows"
         @assert length(Q) == N "Q must have one matrix per agent"
         @assert all(size(Qi, 1) == nx && size(Qi, 2) == nx for Qi in Q) "Each Q[i] must be nx × nx"
         @assert length(R) == N "R must be a N-long list of N matrices, where N is the # of agents (one weight R[i][j] for each agent i,j)"
@@ -212,10 +216,10 @@ struct DynLQGameTI # Dynamic time-invariant Nash equilibrium problem
         @assert size(C_x, 1) == length(b_x) "Number of C_x rows must match length of b_x"
         @assert length(C_loc_vec) == N "C_loc_vec must have one matrix per agent"
         @assert length(b_loc_vec) == N "b_loc_vec must have one vector per agent"
-        @assert all(size(C_loc_vec[i], 2) == nu[i] for i in 1:length(Bvec)) "Each C_loc_vec[i] must have nu[i] columns"
-        @assert all(size(C_loc_vec[i], 1) == length(b_loc_vec[i]) for i in 1:length(Bvec)) "Each C_loc_vec[i] rows must match length of b_loc_vec[i]"
+        @assert all(size(C_loc_vec[i], 2) == nu[i] for i in 1:length(B)) "Each C_loc_vec[i] must have nu[i] columns"
+        @assert all(size(C_loc_vec[i], 1) == length(b_loc_vec[i]) for i in 1:length(B)) "Each C_loc_vec[i] rows must match length of b_loc_vec[i]"
         @assert length(C_u_vec) == N "C_u_vec must have one matrix per agent"
-        @assert all(size(C_u_vec[i], 2) == nu[i] for i in 1:length(Bvec)) "Each C_u_vec[i] must have nu[i] columns"
+        @assert all(size(C_u_vec[i], 2) == nu[i] for i in 1:length(B)) "Each C_u_vec[i] must have nu[i] columns"
         @assert size(b_u, 1) == size(C_u_vec[1], 1) "b_u length must match number of shared input constraints (rows of C_u_vec[1])"
         @assert all(size(C_u_vec[i], 1) == size(C_u_vec[1], 1) for i in 1:N) "All C_u_vec[i] must have the same number of rows"
         if !isnothing(c)
@@ -243,16 +247,7 @@ struct DynLQGameTI # Dynamic time-invariant Nash equilibrium problem
         end
 
         ## Construct matrices
-
-        # Create Bi as views on B
-        B = hcat(Bvec...)
-        Bi = Vector{SubArray}(undef, N)
-        start_col = 1
-        for i in 1:N
-            n_cols = nu[i]
-            Bi[i] = @view B[:, start_col:start_col+n_cols-1]
-            start_col += n_cols
-        end
+      
 
         ## Constraints
         C_loc = Matrix(BlockDiagonal(C_loc_vec))
@@ -280,9 +275,10 @@ struct DynLQGameTI # Dynamic time-invariant Nash equilibrium problem
         for i in 1:N
             n_cols = nu[i]
             C_u_i[i] = @view C_u[:, start_col:start_col+n_cols-1]
+            start_col += n_cols
         end
 
-        new(nx, nu, N, A, B, Bi, c, Q, R, P, q, r, p, C_x, b_x, m_x, C_loc, b_loc, C_loc_i, b_loc_i, m_loc, C_u, b_u, C_u_i, m_u)
+        new(nx, nu, N, A, B, c, Q, R, P, q, r, p, C_x, b_x, m_x, C_loc, b_loc, C_loc_i, b_loc_i, m_loc, C_u, b_u, C_u_i, m_u)
     end
 end
 
@@ -323,7 +319,7 @@ The objective for agent i is
 - `N::Int64`: Number of agents.
 - `A::Matrix{Float64}`: State transition matrix.
 - `B::Matrix{Float64}`: Input matrix (horizontally concatenated for all agents).
-- `Bi::Vector{SubArray{Float64,2}}`: Views on `B` for each agent.
+- `B::Vector{SubArray{Float64,2}}`: Views on `B` for each agent.
 - `Q::Vector{Matrix{Float64}}`: State cost matrices for each agent, size nₓ×nₓ.
 - `R::Vector{Vector{Matrix{Float64}}}`: Input cost matrix, the i,j-th element is size nᵤⁱ×nᵤʲ.
 - `P::Vector{Matrix{Float64}}`: Terminal cost matrices for each agent, size nₓ×nₓ.
@@ -405,8 +401,9 @@ struct DynLQGameTV # Dynamic time-Variant Nash equilibrium problem
         ## Dimensionality checks
         @assert all(size(A[t], 1) == size(A[t], 2) for t in all_t ) "A must be square (nx × nx)"
         @assert all(size(B[t][i], 1) == nx for i in all_ag, t in all_t) "Each matrix B_i in B must have nx rows"
+        @assert length(Q) == Thor-1 "Q must have length T_hor-1"
         @assert all(length(Qt) == N for Qt in Q) "Qt must have one matrix per agent"
-        @assert all(size(Q[t][i], 1) == nx && size(Q[t][i], 2) == nx for i in all_ag,t in all_t ) "Each Q[i] must be nx × nx"
+        @assert all(size(Q[t][i], 1) == nx && size(Q[t][i], 2) == nx for i in all_ag,t in 1:Thor-1 ) "Each Q[i] must be nx × nx"
         @assert all(length(Rt) == N for Rt in R) "R[t] must be a N-long list of N matrices, where N is the # of agents "
         @assert all(length(R[t][i]) == N  for i in all_ag, t in all_t) "Each R[t][i] must be a list of length N (one weight R[i][j] for each agent i,j)"
         @assert all(size(R[t][i][j], 1) == nu[i] && size(R[t][i][j], 2) == nu[j] for t in all_t, i in all_ag, j in all_ag) "Each R[i][j] must be nu[i] × nu[j]"
@@ -436,10 +433,11 @@ struct DynLQGameTV # Dynamic time-Variant Nash equilibrium problem
             c = [zeros(nx) for _ in all_t]
         end
         if !isnothing(q)
-            @assert all(length(q[t]) == N for t in all_t) "q[t] must have one vector per agent"
-            @assert all(length(q[t][i]) == nx for i in all_ag, t in all_t) "Each q[t][i] must have length nx"
+            @assert length(q) == Thor-1 "q must be of length T_hor - 1"
+            @assert all(length(q[t]) == N for t in 1:Thor-1) "q[t] must have one vector per agent"
+            @assert all(length(q[t][i]) == nx for i in all_ag, t in 1:Thor-1) "Each q[t][i] must have length nx"
         else
-            q = [[zeros(nx) for _ in all_i] for _ in all_t]
+            q = [[zeros(nx) for _ in all_ag] for _ in 1:Thor-1]
         end
         if !isnothing(r)
             @assert all(length(r[t]) == N for t in all_t) "r[t] must have one vector per agent"

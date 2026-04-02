@@ -521,7 +521,7 @@ function CommonSolve.init(prob::DynLQGameTI, ::Type{ADMMCLQGSolver};
     Clarabel.setup!(proj_U, Q, q, Cu, du, cone, settings)
 
     # Store prediction model for the linear system
-    Γ, _, Θ, k = generate_prediction_model(prob.A, prob.Bi, T_hor)
+    Γ, _, Θ, k = generate_prediction_model(prob.A, prob.B, T_hor)
     predmod = (Γ=SparseMatrixCSC(Γ), Θ=SparseMatrixCSC(Θ), k=k)
 
     # check for trivial infeasibility: A[i,:] = 0, b[i]<0 for some i
@@ -668,7 +668,7 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     settings = Clarabel.Settings(verbose=false)
     A_θ = [prob.C; Matrix{Float64}(I(prob.n_θ)); -Matrix{Float64}(I(prob.n_θ))]
     b_θ = [prob.d; prob.ub; -prob.lb]
-    A_θ_x = SparseMatrixCSC([-prob.B prob.A; A_θ zeros(size(A_θ, 1), prob.n)])
+    A_θ_x = SparseMatrixCSC([-hcat(prob.B...) prob.A; A_θ zeros(size(A_θ, 1), prob.n)])
     b_θ_x = [prob.b; b_θ]
     cone = [Clarabel.NonnegativeConeT(size(A_θ_x, 1))] # Sets all constraints to inequalities
     H_θ_x = SparseMatrixCSC(Matrix{Float64}(I(prob.n_θ + prob.n)))
@@ -697,7 +697,7 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     end
 
     # Retrieve initial active set
-    AS0 = findall(prob.A * x .>= prob.B * θ + prob.b .- tol)
+    AS0 = findall(prob.A * x .>= hcat(prob.B...) * θ + prob.b .- tol)
     return ParametricDAQPSolver(prob, options, Ref(:Initialized), AS0)
 
 end

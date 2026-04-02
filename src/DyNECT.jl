@@ -4,7 +4,7 @@ module DyNECT
 using LinearAlgebra, SparseArrays, MatrixEquations, BlockDiagonals, BlockArrays, CommonSolve
 
 # External solvers
-using DAQP, Clarabel, JuMP, Monviso, ParametricDAQP
+using DAQPBase, Clarabel, JuMP, Monviso, ParametricDAQP
 
 # Automatic differentiation
 using Zygote

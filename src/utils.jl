@@ -139,7 +139,7 @@ function DynLQGame2mpAVI(prob::DynLQGameTV) # time varying
 end
 
 @doc raw"""
-    generate_prediction_model(A, Bi, T_hor)
+    generate_prediction_model(A, B, T_hor)
 
 Constructs the prediction model matrices, ``\Gamma_i``, and ``\Theta``, and a vector ``\bar{c}`` for a discrete-time affine system
 ```math 
@@ -171,7 +171,7 @@ Specifically, the matrices are
 ```
 # Arguments
 - `A`: State transition matrix.
-- `Bi`: Vector of input matrices for each agent or subsystem.
+- `B`: Vector of input matrices for each agent or subsystem.
 - `T_hor`: Prediction horizon (number of time steps).
 - `c`: affine part of the dynamics. If omitted, defaults to a vector of zeros.
 
@@ -181,12 +181,12 @@ Specifically, the matrices are
 - `Θ`: Matrix mapping the initial state to the stacked state sequence.
 - `c̅`: Affine additive vector.
 """
-function generate_prediction_model(A::Matrix{Float64}, Bi::Vector{Matrix{Float64}}, T_hor::Int; c::Vector{Float64}=zeros(size(A, 1)))
+function generate_prediction_model(A::Matrix{Float64}, B::Vector{Matrix{Float64}}, T_hor::Int; c::Vector{Float64}=zeros(size(A, 1)))
     # system: x⁺=Ax + ∑(Bᵢuᵢ) + c
     # prediction model: x̅ = Θx₀+(∑ Γᵢu̅ᵢ) + c̅
     n_x = size(A, 1)
-    n_u = map(x -> size(x, 2), Bi)
-    N = length(Bi)
+    n_u = map(x -> size(x, 2), B)
+    N = length(B)
     Γ = zeros(n_x * T_hor, sum(n_u) * T_hor) # Maps the column stack of input sequences to state sequence
     Γi = Vector{SubArray}(undef, N) # Views into Γ
     start_col = 1
@@ -196,7 +196,7 @@ function generate_prediction_model(A::Matrix{Float64}, Bi::Vector{Matrix{Float64
     end
     # Define the Γ matrices
     for i in 1:N
-        Γi[i][1:n_x, 1:n_u[i]] .= Bi[i]
+        Γi[i][1:n_x, 1:n_u[i]] .= B[i]
         for t in 1:T_hor-1
             current_rows = n_x*t+1:n_x*(t+1)
             previous_rows = n_x*(t-1)+1:n_x*t
@@ -225,7 +225,7 @@ end
 function generate_prediction_model(A::Vector{Matrix{Float64}}, 
         B::Vector{Vector{Matrix{Float64}}},     
         T_hor::Int; 
-        c::Vector{Vector{Float64}}=[zeros(size(A, 1)) for _ in 1:T_hor])
+        c::Vector{Vector{Float64}}=[zeros(size(A[1], 1)) for _ in 1:T_hor])
     # system: x⁺=Aᵗx + ∑(Bᵢᵗuᵢ) + cᵗ
     # prediction model: x̅ = Θx₀+(∑ Γᵢu̅ᵢ) + c̅
     n_x = size(A[1], 1)
