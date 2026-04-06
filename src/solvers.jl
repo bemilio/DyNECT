@@ -702,14 +702,36 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
 
 end
 
-function CommonSolve.solve!(pDAQP::ParametricDAQPSolver)
+#function CommonSolve.solve!(pDAQP::ParametricDAQPSolver)
     # Convert problem into ParametricDAQP format
-    prob = ParametricDAQP.MPVI(pDAQP.mpAVI.H, pDAQP.mpAVI.F, pDAQP.mpAVI.f, pDAQP.mpAVI.A, pDAQP.mpAVI.B, pDAQP.mpAVI.b)
-    n_θ = size(pDAQP.mpAVI.C, 2)
-    Θ = (A=pDAQP.mpAVI.C', b=pDAQP.mpAVI.d, ub=pDAQP.mpAVI.ub, lb=pDAQP.mpAVI.lb)
-    (sol, info) = ParametricDAQP.mpsolve(prob, Θ; opts=pDAQP.options, AS0=pDAQP.AS0)
+    #prob = ParametricDAQP.MPQP(pDAQP.mpAVI.H, pDAQP.mpAVI.F, pDAQP.mpAVI.f, pDAQP.mpAVI.A, pDAQP.mpAVI.B, pDAQP.mpAVI.b) #replaced MPVI with MPQP V0.4.9
+
+#    n_θ = size(pDAQP.mpAVI.C, 2)
+#    Θ = (A=pDAQP.mpAVI.C', b=pDAQP.mpAVI.d, ub=pDAQP.mpAVI.ub, lb=pDAQP.mpAVI.lb)
+#    (sol, info) = ParametricDAQP.mpsolve(prob, Θ; opts=pDAQP.options, AS0=pDAQP.AS0)
+#    return sol
+#end
+
+function CommonSolve.solve!(pDAQP::ParametricDAQPSolver)
+    mpAVI = pDAQP.mpAVI
+
+    # Pass raw named tuple directly to mpsolve — it calls setup_mpp internally
+    raw = (
+        H = mpAVI.H,
+        F = mpAVI.F,
+        f = mpAVI.f,
+        A = mpAVI.A,
+        B = mpAVI.B,
+        b = mpAVI.b,
+    )
+
+    Θ = (A  = mpAVI.C',
+         b  = mpAVI.d,
+         ub = mpAVI.ub,
+         lb = mpAVI.lb)
+
+    (sol, info) = ParametricDAQP.mpsolve(raw, Θ;
+                                          opts = pDAQP.options,
+                                          AS0  = pDAQP.AS0)
     return sol
 end
-
-
-
