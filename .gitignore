@@ -12,3 +12,5 @@ pv_imp_results.csv
 /src/python/DGSQP/DGSQP/__pycache__
 /src/python
 /.CondaPkg
+static_mpGNE/output/*.png
+static_mpGNE/output/*.pdf
