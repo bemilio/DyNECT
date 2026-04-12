@@ -4,7 +4,6 @@
 # Silent assembly, prints only "mpvi OK"
 
 module Fast_mpGNE
-
 using Symbolics
 using LinearAlgebra
 
@@ -512,9 +511,43 @@ function materialize(mpvi::MPVIAssembly)
     )
 end
 
+# DISPLAY
+function show_mpvi(mpvi::MPVIAssembly)
+    players = mpvi.player_records
+    A, B, d = mpvi.A, mpvi.B, mpvi.d
+    n_theta  = size(B, 2)
+
+    println("Reparametrization Ax ≤ Bθ + d")
+    println("  dims: A$(size(A))  B$(size(B))  n_theta=$n_theta")
+    println()
+    for i in 1:size(A, 1)
+        lhs_terms = String[]
+        for p in players
+            for j in 1:p.dim
+                val = A[i, p.global_cols[j]]
+                valv = val isa Number ? val : Symbolics.value(val)
+                if !(valv isa Number && iszero(valv))
+                    dvar = p.dim == 1 ? "x_$(p.index)" : "x_$(p.index)_$(j)"
+                    push!(lhs_terms, "$(round(Float64(valv), digits=4))⋅$dvar")
+                end
+            end
+        end
+        rhs_terms = String[]
+        !iszero(d[i]) && push!(rhs_terms, "$(round(d[i], digits=4))")
+        for t in 1:n_theta
+            !iszero(B[i,t]) && push!(rhs_terms, "$(round(B[i,t], digits=4))⋅θ$t")
+        end
+        lhs = isempty(lhs_terms) ? "0" : join(lhs_terms, " + ")
+        rhs = isempty(rhs_terms) ? "0" : join(rhs_terms, " + ")
+        println("  row $i:  $lhs  ≤  $rhs")
+    end
+    println()
+end
+
 # EXPORTS
 export GameBuilder, MPVIAssembly
 export @player, @cost, @constraint
 export build_mpvi, materialize
+export show_mpvi
 
 end
