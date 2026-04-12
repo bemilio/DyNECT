@@ -1,10 +1,6 @@
-# static_mpgne_verbose.jl — Verbose mpGNE example
-# Full pipeline: symbolic params, game characterization, display tools
-# Use for: game debugging, mathematical verification, thesis analysis
-
-include("../verbose/src/Static_mpGNE.jl")
+include("../../verbose/src/Static_mpGNE.jl")
 using .Static_mpGNE
-include("../Solver.jl")
+include("../../Solver.jl")
 
 # Define game structure
 game = GameBuilder(N=3)

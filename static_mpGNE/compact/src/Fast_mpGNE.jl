@@ -2,7 +2,6 @@
 # Compact single-file GNE → mpVI pipeline
 # No symbolic parameters — numeric matrices defined in caller scope
 # Silent assembly, prints only "mpvi OK"
-# Same logic as verbose version, same MPVIAssembly output
 
 module Fast_mpGNE
 
