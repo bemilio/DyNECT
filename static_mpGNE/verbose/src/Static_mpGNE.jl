@@ -14,14 +14,22 @@ include("Assembly.jl")
 # types
 export GameBuilder
 
-#macros
+# macros
 export @player, @param, @cost, @constraint
 
-#setup
+# setup
 export assign_params!
 
-#display
+# validation
 export validate_game
+
+# characterization
+export show_coupling
+export check_monotonicity
+export check_symmetry
+export check_theta_feasibility
+
+# display
 export show_operator
 export show_shared_constraints
 export show_local_constraints
@@ -30,7 +38,7 @@ export show_parametric_constraints
 export show_theta_set
 export show_mpvi
 
-#pipeline
+# pipeline
 export build_mpvi
 export materialize
 
