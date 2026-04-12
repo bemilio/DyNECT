@@ -1,28 +1,46 @@
 # Solver.jl — MPVIAssembly → DyNECT.mpAVI → pDAQP
-using .Static_mpGNE
+#using .Static_mpGNE
 using DyNECT
 using CommonSolve
 using LinearAlgebra
 
 # ── lb/ub extraction: C/e encodes θ ≥ 0 (nonnegativity) and θ ≤ b (conservation)
+# modified for larger dimensions c
 function _extract_theta_bounds(mpvi)
     n_theta = size(mpvi.C, 2)
     lb = zeros(n_theta)
-    ub = zeros(n_theta)
+    ub = fill(Inf, n_theta)
+    
     for i in 1:size(mpvi.C, 1)
-        col = findfirst(!=(0.0), mpvi.C[i, :])
-        isnothing(col) && continue
-        if mpvi.C[i, col] > 0
-            # θ ≤ e[i]  →  ub = e[i]  (could be 0 for negative-b case)
-            ub[col] = mpvi.e[i]
+        row = mpvi.C[i, :]
+        nz  = findall(!=(0.0), row)
+        length(nz) == 1 || continue   # skip conservation rows (multiple nonzeros)
+        col = nz[1]
+        if row[col] < 0
+            # -θ ≤ e[i]  →  θ ≥ -e[i]
+            lb[col] = max(lb[col], -mpvi.e[i])
         else
-            # -θ ≤ e[i]  →  lb = -e[i]
-            lb[col] = -mpvi.e[i]
+            # θ ≤ e[i]
+            ub[col] = min(ub[col], mpvi.e[i])
         end
     end
+    
+    # replace Inf with conservation bound
+    for i in 1:size(mpvi.C, 1)
+        row = mpvi.C[i, :]
+        nz  = findall(!=(0.0), row)
+        length(nz) == 1 && continue   # skip nonnegativity rows
+        # conservation row: sum of theta_i <= e[i]
+        # use e[i] as ub for each involved theta
+        for col in nz
+            if isinf(ub[col])
+                ub[col] = mpvi.e[i]
+            end
+        end
+    end
+    
     return lb, ub
 end
-
 function to_dynect_mpAVI(mpvi)
     mat       = materialize(mpvi)
     lb, ub    = _extract_theta_bounds(mpvi)
@@ -52,7 +70,11 @@ function show_solution(sol, mpvi)
     println()
     for beta in betas
         x = evaluate_gne(sol, beta)
-        println("  x*(β=$(round.(beta, digits=2))) = $(round.(x, digits=4))")
+        if x === nothing
+            println("  x*(β=$(round.(beta, digits=2))) = infeasible")
+        else
+            println("  x*(β=$(round.(beta, digits=2))) = $(round.(x, digits=4))")
+        end
     end
     println()
 end

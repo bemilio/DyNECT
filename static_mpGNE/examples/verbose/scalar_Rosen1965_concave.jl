@@ -1,6 +1,6 @@
-include("../src/Static_mpGNE.jl")
+include("../../verbose/src/Static_mpGNE.jl")
 using .Static_mpGNE
-include("../src/Solver.jl")   
+include("../../Solver.jl")
 
 println("=== Test Name: Rosen scalar game ===")
 
