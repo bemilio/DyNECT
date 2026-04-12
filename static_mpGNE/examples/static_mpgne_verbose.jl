@@ -1,13 +1,13 @@
-t_start = time()
-include("../src/verbose/Static_mpGNE.jl")
+# static_mpgne_verbose.jl — Verbose mpGNE example
+# Full pipeline: symbolic params, game characterization, display tools
+# Use for: game debugging, mathematical verification, thesis analysis
+
+include("../verbose/src/Static_mpGNE.jl")
 using .Static_mpGNE
-include("../src/Solver.jl")
+include("../Solver.jl")
 
-println("=== Test Name: Vector game ===")
-println()
-
+# Define game structure
 game = GameBuilder(N=3)
-
 @player game 1 n=2
 @player game 2 n=2
 @player game 3 n=2
@@ -30,6 +30,7 @@ game = GameBuilder(N=3)
 @constraint game  [x_1_1 + x_1_2 + 2*x_2_1, x_1_2 + x_2_2] <= [3.0, 2.0]
 @constraint game  [x_1_1 + x_2_1 + x_3_1, x_1_2 + x_2_2 + x_3_2] <= [5.0, 3.0]
 
+# Assign numeric values (optional)
 assign_params!(game, Dict(
     :Q1 => [2.0 0.0; 0.0 1.0],
     :Q2 => [3.0 0.0; 0.0 2.0],
@@ -40,25 +41,22 @@ assign_params!(game, Dict(
     :c3 => [0.0, 0.0]
 ))
 
+# Validation
 validate_game(game)
-    show_operator(game)
-show_shared_constraints(game)
-show_local_constraints(game)
-show_feasible_set(game)
-    show_parametric_constraints(game)
-    show_theta_set(game)
 
-show_coupling(game)           # structure first — who talks to whom
-check_monotonicity(game)      # existence/uniqueness
-check_symmetry(game)          # potential game?
-check_theta_feasibility(game) # is the parameter space well-posed?
+# Game characterization 
+show_coupling(game)
+check_monotonicity(game)
+check_symmetry(game)
+check_theta_feasibility(game)
 
+# Mathematical objects
 show_operator(game)
 show_parametric_constraints(game)
+show_theta_set(game)
 
+# Assemble and solve 
 mpvi = build_mpvi(game)
 show_mpvi(mpvi)
-
-sol = solve_gne(mpvi)
+sol  = solve_gne(mpvi)
 show_solution(sol, mpvi)
-
