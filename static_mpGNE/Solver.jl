@@ -6,41 +6,36 @@ using LinearAlgebra
 
 # ── lb/ub extraction: C/e encodes θ ≥ 0 (nonnegativity) and θ ≤ b (conservation)
 # modified for larger dimensions c
-function _extract_theta_bounds(mpvi)
+function _extract_theta_bounds(mpvi) #testing 
     n_theta = size(mpvi.C, 2)
-    lb = zeros(n_theta)
+    lb = fill(-Inf, n_theta)   # ← was zeros, should start at -Inf
     ub = fill(Inf, n_theta)
-    
+
     for i in 1:size(mpvi.C, 1)
         row = mpvi.C[i, :]
         nz  = findall(!=(0.0), row)
-        length(nz) == 1 || continue   # skip conservation rows (multiple nonzeros)
+        length(nz) == 1 || continue
         col = nz[1]
         if row[col] < 0
-            # -θ ≤ e[i]  →  θ ≥ -e[i]
             lb[col] = max(lb[col], -mpvi.e[i])
         else
-            # θ ≤ e[i]
             ub[col] = min(ub[col], mpvi.e[i])
         end
     end
-    
-    # replace Inf with conservation bound
+
+    # handle conservation rows
     for i in 1:size(mpvi.C, 1)
         row = mpvi.C[i, :]
         nz  = findall(!=(0.0), row)
-        length(nz) == 1 && continue   # skip nonnegativity rows
-        # conservation row: sum of theta_i <= e[i]
-        # use e[i] as ub for each involved theta
+        length(nz) == 1 && continue
         for col in nz
-            if isinf(ub[col])
-                ub[col] = mpvi.e[i]
-            end
+            row[col] > 0 && (ub[col] = min(ub[col], mpvi.e[i]))
         end
     end
-    
+
     return lb, ub
 end
+
 function to_dynect_mpAVI(mpvi)
     mat       = materialize(mpvi)
     lb, ub    = _extract_theta_bounds(mpvi)
