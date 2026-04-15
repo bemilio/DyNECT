@@ -4,47 +4,16 @@ using DyNECT
 using CommonSolve
 using LinearAlgebra
 
-# ── lb/ub extraction: C/e encodes θ ≥ 0 (nonnegativity) and θ ≤ b (conservation)
-# modified for larger dimensions c
-function _extract_theta_bounds(mpvi) #testing 
-    n_theta = size(mpvi.C, 2)
-    lb = fill(-Inf, n_theta)   # ← was zeros, should start at -Inf
-    ub = fill(Inf, n_theta)
-
-    for i in 1:size(mpvi.C, 1)
-        row = mpvi.C[i, :]
-        nz  = findall(!=(0.0), row)
-        length(nz) == 1 || continue
-        col = nz[1]
-        if row[col] < 0
-            lb[col] = max(lb[col], -mpvi.e[i])
-        else
-            ub[col] = min(ub[col], mpvi.e[i])
-        end
-    end
-
-    # handle conservation rows
-    for i in 1:size(mpvi.C, 1)
-        row = mpvi.C[i, :]
-        nz  = findall(!=(0.0), row)
-        length(nz) == 1 && continue
-        for col in nz
-            row[col] > 0 && (ub[col] = min(ub[col], mpvi.e[i]))
-        end
-    end
-
-    return lb, ub
-end
-
-function to_dynect_mpAVI(mpvi)
-    mat       = materialize(mpvi)
-    lb, ub    = _extract_theta_bounds(mpvi)
+function to_dynect_mpAVI(mpvi, lb::Vector{Float64}, ub::Vector{Float64})
+    mat = materialize(mpvi)
     return DyNECT.mpAVI(mat.H, mat.Ftheta, mat.f, mat.A, mat.B, mat.d;
                         C=mpvi.C, d=mpvi.e, lb=lb, ub=ub)
 end
 
-function solve_gne(mpvi)
-    return CommonSolve.solve(to_dynect_mpAVI(mpvi), DyNECT.ParametricDAQPSolver)
+function solve_gne(mpvi, lb::Vector{Float64}, ub::Vector{Float64})
+    sol = CommonSolve.solve(to_dynect_mpAVI(mpvi, lb, ub),
+                            DyNECT.ParametricDAQPSolver)
+    return (sol=sol, lb=lb, ub=ub)
 end
 
 function evaluate_gne(sol, beta::Vector{Float64})
@@ -53,18 +22,19 @@ end
 
 n_critical_regions(sol) = length(sol.CRs)
 
-function show_solution(sol, mpvi)
-    lb, ub = _extract_theta_bounds(mpvi)
-    mid    = (lb .+ ub) ./ 2
-    betas  = [mid]
+function show_solution(result, mpvi)
+    sol, lb, ub = result.sol, result.lb, result.ub
+    mid   = (lb .+ ub) ./ 2
+    betas = [mid]
     for i in 1:length(mid)
         b = copy(mid); b[i] = lb[i] + 0.01; push!(betas, b)
         b = copy(mid); b[i] = ub[i] - 0.01; push!(betas, b)
     end
-    println("=== GNE Solution — $(n_critical_regions(sol)) critical regions ===")
+    betas = filter(b -> all(mpvi.C * b .<= mpvi.e .+ 1e-8), betas)
+    println("=== GNE Solution — $(n_critical_regions(result.sol)) critical regions ===")
     println()
     for beta in betas
-        x = evaluate_gne(sol, beta)
+        x = evaluate_gne(result.sol, beta)
         if x === nothing
             println("  x*(β=$(round.(beta, digits=2))) = infeasible")
         else
@@ -74,9 +44,9 @@ function show_solution(sol, mpvi)
     println()
 end
 
-function show_pwa_map(sol) # testing in linear map 
-    s = sol.scaling[1]
-    t = sol.translation[1]
+function show_pwa_map(sol)
+    s = sol.scaling isa Number ? sol.scaling : sol.scaling[1]
+    t = sol.translation isa Number ? sol.translation : sol.translation[1]
     println("=== PWA map x*(θ) per critical region ===")
     for (i, cr) in enumerate(sol.CRs)
         c0 = cr.z[2, :]
@@ -86,3 +56,5 @@ function show_pwa_map(sol) # testing in linear map
         println("  x*(θ) = $(round.(c0 .+ offset, digits=4)) + $(round.(c1, digits=4)) * θ")
     end
 end
+
+show_pwa_map(result::NamedTuple) = show_pwa_map(result.sol)

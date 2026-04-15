@@ -30,25 +30,7 @@ game = GameBuilder(N=2)
 mpvi = build_mpvi(game)
 show_mpvi(mpvi)
 
-sol = solve_gne(mpvi)
-show_solution(sol, mpvi)
-show_pwa_map(sol) #testing linear map 
 
-for (i, cr) in enumerate(sol.CRs)
-    th = cr.th  
-    x = evaluate_gne(sol, (th - sol.translation) ./ sol.scaling)  
-    x = DyNECT.evaluatePWA(sol, th)
-    if x !== nothing
-        s = x[1] + x[2]
-        println("CR $i: θ=$(round.(cr.th, digits=3)), x*=$(round.(x, digits=3)), x1+x2=$(round(s, digits=3))")
-    else
-        println("CR $i: θ=$(round.(cr.th, digits=3)) → infeasible")
-    end
-end
+result = solve_gne(mpvi, [-1.0], [0.0])
+show_solution(result, mpvi)
 
-println("\n=== CR boundaries in original θ space ===")
-for (i, cr) in enumerate(sol.CRs)
-    println("\n--- CR $i ---")
-    @show cr.Ath
-    @show cr.bth
-end

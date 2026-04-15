@@ -36,4 +36,4 @@ mpvi = build_mpvi(game)
 show_mpvi(mpvi)   # ← uncomment to verify assembly dimensions
 sol  = solve_gne(mpvi)
 show_solution(sol, mpvi)
-show_pwa_map(sol)
+#show_pwa_map(sol)
