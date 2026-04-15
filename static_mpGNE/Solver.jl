@@ -73,3 +73,16 @@ function show_solution(sol, mpvi)
     end
     println()
 end
+
+function show_pwa_map(sol) # testing in linear map 
+    s = sol.scaling[1]
+    t = sol.translation[1]
+    println("=== PWA map x*(θ) per critical region ===")
+    for (i, cr) in enumerate(sol.CRs)
+        c0 = cr.z[2, :]
+        c1 = cr.z[1, :] .* s
+        offset = -c1 .* t
+        println("\n--- CR $i  (active set: rows $(cr.AS)) ---")
+        println("  x*(θ) = $(round.(c0 .+ offset, digits=4)) + $(round.(c1, digits=4)) * θ")
+    end
+end
