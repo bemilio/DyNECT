@@ -1,12 +1,11 @@
 include("../../verbose/src/Static_mpGNE.jl")
 using .Static_mpGNE
-include("../../Solver.jl") 
+include("../../Solver.jl")
 
-println("=== Test Name: Vector game ===")
-println()
-## User-defined game
+t_start = time()
+println("=== Test Name: (VERBOSE) Vector game 2-player ===")
+
 game = GameBuilder(N=2)
-
 @player game 1 n=2
 @player game 2 n=2
 
@@ -21,10 +20,8 @@ game = GameBuilder(N=2)
 
 @constraint game  -x1 <= 0
 @constraint game  -x2 <= 0
-#@constraint game  [x_1_1 + 2*x_2_1, x_1_2 + x_2_2] <= [3.0, 2.0]
-@constraint game  [x_1_1 + x_1_2 + 2*x_2_1, x_1_2 + x_2_2] <= [3.0, 2.0] #non diagonal case
+@constraint game  [x_1_1 + x_1_2 + 2*x_2_1, x_1_2 + x_2_2] <= [3.0, 2.0]
 
-# optionally assign numerical values here:
 assign_params!(game, Dict(
     :Q1 => [2.0 0.0; 0.0 1.0],
     :Q2 => [3.0 0.0; 0.0 2.0],
@@ -33,31 +30,25 @@ assign_params!(game, Dict(
     :c2 => [0.0, -1.0]
 ))
 
-## Display
-println()
-#validate_game(game) # testing 
-#show_operator(game)
-#show_shared_constraints(game)
-#show_local_constraints(game)
-#show_feasible_set(game)
-#show_parametric_constraints(game)
-#show_theta_set(game)
-
+validate_game(game)
+show_coupling(game)
+check_monotonicity(game)
+show_operator(game)
+show_parametric_constraints(game)
+show_theta_set(game)
 
 mpvi = build_mpvi(game)
 show_mpvi(mpvi)
 
-## Solve
-sol = solve_gne(mpvi)
+θub = [3.0, 2.0]
+θlb = [0.0, 0.0]
+mpvi_dynect = to_dynect_mpAVI(mpvi)
+mpvi_dynect = DyNECT.setParameterSpace(mpvi_dynect,
+    C = [Matrix{Float64}(I, 2, 2); -Matrix{Float64}(I, 2, 2)],
+    d = [θub; -θlb],
+    ub = θub, lb = θlb)
+sol = CommonSolve.solve(mpvi_dynect, DyNECT.ParametricDAQPSolver)
+filter_gne_crs!(sol, mpvi)
+show_solution((sol=sol, lb=θlb, ub=θub), mpvi)
 
-# === Evaluate — three presentation strategies (pick one) ===
-
-# Option A: automatic — show_solution samples corners of Θ
-show_solution(sol, mpvi)
-
-# Option B: explicit betas passed in
-# show_solution(sol, mpvi, betas=[[1.0, 1.0], [0.5, 0.5], [2.0, 1.5]])
-
-# Option C: scenario dict (if physical scenarios)
-# scenario = load_scenario("scenarios/energy_2player.toml")
-# show_solution(sol, mpvi, betas=scenario[:betas])
+println("total: $(round(time() - t_start, digits=2))s")

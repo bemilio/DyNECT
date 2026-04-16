@@ -1,24 +1,35 @@
-include("../compact/src/Fast_mpGNE.jl")
-using .Fast_mpGNE
-include("../Solver.jl")
+# verbose
+include("../../verbose/src/Static_mpGNE.jl")
+using .Static_mpGNE
+include("../../Solver.jl")
 using Plots
+using LinearAlgebra
 using ParametricDAQP
 
 t_start = time()
-println("=== Test Name: Rosen scalar game ===")
+println("=== Test Name: (VERBOSE) Rosen scalar game ===")
 
 game = GameBuilder(N=2)
 @player game 1 n=1
 @player game 2 n=1
 
 @cost game 1  0.5*x1^2 - x1*x2
-@cost game 2  0.5*x2^2 + x1*x2
+@cost game 2  x2^2 + x1*x2
 
 @constraint game  x1 + x2 >= 1
 
+## Display
+validate_game(game)
+show_operator(game)
+show_shared_constraints(game)
+show_local_constraints(game)
+show_feasible_set(game)
+show_parametric_constraints(game)
+show_theta_set(game)
+
 # Assemble
 mpvi = build_mpvi(game)
-# show_mpvi(mpvi)
+show_mpvi(mpvi)
 
 # Solve
 θub = [2.0]
@@ -36,11 +47,12 @@ for θ in θlb[1]:0.02:θub[1]
         push!(x_values, x)
         push!(theta_values, θ)
     end
+
 end
 
 x_array = hcat(x_values...)'
 scatter(x_array[:, 1], x_array[:, 2], marker_z=theta_values,
-    xlabel="x1", ylabel="x2", label="",
+    xlabel="x1", ylabel="x2", label="", 
     colorbar_title="θ", right_margin=5Plots.mm)
 display(plot!())
 
