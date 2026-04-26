@@ -202,7 +202,7 @@ struct DynLQGame # Dynamic Nash equilibrium problem
     end
 end
 
-#testing new struct
+#added v_static_mpGNE
 struct StaticGNEGame
     N::Int
     n::Vector{Int}

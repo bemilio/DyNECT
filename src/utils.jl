@@ -77,7 +77,7 @@ function DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
     return mpAVI(Matrix{Float64}(H), F, f, D, E, d)
 end
 
-#testing new static_mpGNE fuction
+#added v_static_mpGNE
 @doc raw"""
     StaticGNE2mpAVI(game::StaticGNEGame)
  

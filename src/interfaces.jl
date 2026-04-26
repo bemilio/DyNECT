@@ -36,3 +36,25 @@ function MPC_control(sol::ParametricDAQP.Solution, x0::Vector{Float64}, nu::Vect
     u = evaluatePWA(sol::ParametricDAQP.Solution, x0::Vector{Float64})
     return first_input_of_sequence(u, nu, N, T_hor)
 end
+
+#added v_static_mpGNE
+function filter_gne_crs!(sol::ParametricDAQP.Solution, game::StaticGNEGame) #testing
+    N = game.N
+    m_sh = length(game.b_sh)
+    n_local = sum(size(game.A_loc[i], 1) for i in 1:N)
+    shared_start = n_local + 1
+    
+    filter!(sol.CRs) do cr
+        for i in 1:m_sh
+            player_row_indices = [shared_start + (p - 1) * m_sh + (i - 1) for p in 1:N]
+            active_status = [row_idx ∈ cr.AS for row_idx in player_row_indices]
+            all_active = all(active_status)
+            none_active = !any(active_status)
+            if !(all_active || none_active)
+                return false
+            end
+        end
+        return true
+    end
+    return length(sol.CRs)
+end
