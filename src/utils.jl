@@ -77,6 +77,85 @@ function DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
     return mpAVI(Matrix{Float64}(H), F, f, D, E, d)
 end
 
+#testing new static_mpGNE fuction
+@doc raw"""
+    StaticGNE2mpAVI(game::StaticGNEGame)
+ 
+Assemble static GNE game into multi-parametric variational inequality (mpAVI).
+ 
+The Nabetani-Tseng-Fukushima reparametrization transforms shared constraints into parameter-dependent bounds:
+- Agent 1: ``A_{\text{sh},1} x_1 \leq \theta_1``
+- Agent i (i>1): ``A_{\text{sh},i} x_i \leq -\theta_{i-1} + b_{\text{sh}}``
+ 
+Returns: ``\text{VI}(H x + f, A x \leq B \theta + b)`` where ``\theta \in [\text{lb}, \text{ub}]``
+"""
+function StaticGNE2mpAVI(game::StaticGNEGame)
+    N = game.N
+    n = game.n
+    n_total = sum(n)
+    m_sh = length(game.b_sh)
+    n_theta = (N - 1) * m_sh
+    
+    # Assemble Hessian (H) from Q blocks 
+    H = BlockArray{Float64}(undef_blocks, n, n)
+    for i in 1:N
+        for j in 1:N
+            H[Block(i, j)] = game.Q[i][j]
+        end
+    end
+    H = Matrix(H)
+    
+    # Assemble linear cost (f) from q vectors
+    f = vcat(game.q...)
+    
+    # Assemble local constraints
+    A_loc_blocks = []
+    b_loc_blocks = []
+    for i in 1:N
+        if size(game.A_loc[i], 1) > 0
+            push!(A_loc_blocks, game.A_loc[i])
+            push!(b_loc_blocks, game.b_loc[i])
+        end
+    end
+    
+    if length(A_loc_blocks) > 0
+        A_loc = vcat(A_loc_blocks...)
+        b_loc = vcat(b_loc_blocks...)
+    else
+        A_loc = zeros(0, n_total)
+        b_loc = Float64[]
+    end
+    
+    # Assemble Nabetani reparametrization
+    # A_hat = blkdiag(A_sh[1], A_sh[2], ..., A_sh[N])
+    A_hat_blocks = [game.A_sh[i] for i in 1:N]
+    A_hat = BlockDiagonal(A_hat_blocks)
+    A_hat = Matrix(A_hat)
+    
+    # B_g structure: [I; -I; -I; ...; -I] (N blocks, (N-1)m_sh columns)
+    B_g_blocks = []
+    push!(B_g_blocks, I(m_sh))
+    for i in 2:N
+        push!(B_g_blocks, -I(m_sh))
+    end
+    B_g = vcat(B_g_blocks...)
+    
+    # d_g = [0; 0; ...; 0; b_sh]  (first (N-1)*m_sh rows zero, last m_sh rows b_sh)
+    d_g = vcat([zeros(m_sh * (N - 1)); game.b_sh]...)
+    
+    # Stack all constraints 
+    A = vcat(A_loc, A_hat)
+    
+    # B matrix: local constraints have no theta dependence (zeros), shared constraints have B_g
+    B_loc = zeros(size(A_loc, 1), n_theta)
+    B = vcat(B_loc, B_g)
+    
+    b = vcat(b_loc, d_g)
+    
+    # Return mpAVI
+    return mpAVI(H, zeros(n_total, n_theta), f, A, B, b)
+end
+
 @doc raw"""
     generate_prediction_model(A, Bi, T_hor)
 

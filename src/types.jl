@@ -215,25 +215,24 @@ struct StaticGNEGame
  
     function StaticGNEGame(
         N::Int,
-        n::Vector{Int},
-        Q::Vector{Vector{Matrix{Float64}}},
-        q::Vector{Vector{Float64}},
-        A_loc::Vector{Matrix{Float64}},
-        b_loc::Vector{Vector{Float64}},
-        A_sh::Vector{Matrix{Float64}},
-        b_sh::Vector{Float64}
+        n::AbstractVector{<:Integer},
+        Q::AbstractVector,
+        q::AbstractVector,
+        A_loc::AbstractVector,
+        b_loc::AbstractVector,
+        A_sh::AbstractVector,
+        b_sh::AbstractVector{<:Real}
     )
         @assert N >= 2 "N must be at least 2 (Nash equilibrium requires multiple players)"
         @assert length(n) == N "n must have length N (one dimension per player)"
         @assert all(n .> 0) "All player dimensions n[i] must be positive"
         
-        @assert length(Q) == 1 "Q must be a single-element vector containing the N×N block matrix"
-        @assert size(Q[1], 1) == N "Q[1] must be an N×N block matrix"
-        @assert size(Q[1], 2) == N "Q[1] must be an N×N block matrix"
+        @assert length(Q) == N "Q must have length N (one block-row per player)"
         for i in 1:N
+            @assert length(Q[i]) == N "Q[$i] must have length N (one block per opponent)"
             for j in 1:N
-                @assert size(Q[1][i,j], 1) == n[i] "Q[1][$i,$j] must have n[$i]=$(n[i]) rows, got $(size(Q[1][i,j], 1))"
-                @assert size(Q[1][i,j], 2) == n[j] "Q[1][$i,$j] must have n[$j]=$(n[j]) columns, got $(size(Q[1][i,j], 2))"
+                @assert size(Q[i][j], 1) == n[i] "Q[$i][$j] must have n[$i]=$(n[i]) rows, got $(size(Q[i][j], 1))"
+                @assert size(Q[i][j], 2) == n[j] "Q[$i][$j] must have n[$j]=$(n[j]) columns, got $(size(Q[i][j], 2))"
             end
         end
         
@@ -259,6 +258,10 @@ struct StaticGNEGame
         @assert length(b_sh) == m_sh "b_sh must have m_sh=$m_sh elements, got $(length(b_sh))"
         
         return new(N, n, Q, q, A_loc, b_loc, A_sh, b_sh)
+    end
+
+    function StaticGNEGame(; N, n, Q, q, A_loc, b_loc, A_sh, b_sh)
+        StaticGNEGame(N, n, Q, q, A_loc, b_loc, A_sh, b_sh)
     end
 end
  

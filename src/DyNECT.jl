@@ -16,7 +16,8 @@ include("interfaces.jl")
 
 using CommonSolve
 include("solvers.jl")
-export DynLQGame, DynLQGame2mpAVI
+export DynLQGame, DynLQGame2mpAVI 
+export StaticGNEGame, StaticGNE2mpAVI
 export solve
 
 end
