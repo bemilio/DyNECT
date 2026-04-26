@@ -1,25 +1,30 @@
-# scalar_Rosen1965_concave.jl — Rosen (1965) scalar concave game
-# 2-player scalar game, non-monotone operator
-# Fast pipeline: numeric params defined upfront
-
-include("../compact/src/Fast_mpGNE.jl")
+isdefined(Main, :Fast_mpGNE) || include("../compact/src/Fast_mpGNE.jl")
 using .Fast_mpGNE
-include("../Solver.jl")
+isdefined(Main, :solve_gne) || include("../Solver.jl")
+using Plots
+using ParametricDAQP
+using CommonSolve
 
-# Define game structure
-game = GameBuilder(N=2)
+t_start = time()
+game = Fast_mpGNE.GameBuilder(N=2)
 @player game 1 n=1
 @player game 2 n=1
-
-@cost game 1  0.5x1^2 - x1*x2
-@cost game 2  0.5*x2^2 + x1*x2
-
-@constraint game  -x1 <= 0
-@constraint game  -x2 <= 0
+@cost game 1  0.5*x1^2 - x1*x2
+@cost game 2  x2^2 + x1*x2
 @constraint game  x1 + x2 >= 1
 
-# Assemble and solve
 mpvi = build_mpvi(game)
-show_mpvi(mpvi)   # ← uncomment to verify assembly dimensions
-sol  = solve_gne(mpvi)
-show_solution(sol, mpvi)
+show_mpvi(mpvi)
+
+θub = [5.0]
+θlb = -[5.0]
+mpvi_dynect = to_dynect_mpAVI(mpvi)
+mpvi_dynect = DyNECT.setParameterSpace(mpvi_dynect, C=[1.0;-1.0;;], d=[θub;-θlb], ub=θub, lb=θlb)
+
+result = solve_gne_both(mpvi_dynect, mpvi)
+
+plot_gne_solution(result.unfiltered, θlb, θub, "Unfiltered")
+plot_gne_solution(result.filtered, θlb, θub, "Filtered")
+
+println("total: $(round(time() - t_start, digits=2))s")
+readline()

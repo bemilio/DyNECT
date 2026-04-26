@@ -165,3 +165,29 @@ end
 
     @test norm(u_inf - u) < 1e-5
 end
+
+#added v_static_mpGNE
+@testset "StaticGNEGame.jl" begin
+    
+    # Rosen example
+    game = StaticGNEGame(
+        N = 2, n = [1, 1],
+        Q = [[fill(1.0, 1, 1), fill(-1.0, 1, 1)], 
+             [fill(1.0, 1, 1), fill(2.0, 1, 1)]],
+        q = [[0.0], [0.0]],
+        A_loc = [zeros(0, 1), zeros(0, 1)],
+        b_loc = [Float64[], Float64[]],
+        A_sh = [fill(-1.0, 1, 1), fill(-1.0, 1, 1)],
+        b_sh = [-1.0]
+    )
+    
+    mpvi = StaticGNE2mpAVI(game)
+    mpvi_bounded = DyNECT.setParameterSpace(mpvi, lb=[-5.0], ub=[5.0], C=[1.0;-1.0;;], d=[0.0; 1.0])
+    sol = CommonSolve.solve(mpvi_bounded, DyNECT.ParametricDAQPSolver)
+    n_cr_before = length(sol.CRs)
+    @test n_cr_before >= 1
+
+    n_valid = filter_gne_crs!(sol, game)
+    @test n_valid <= n_cr_before
+    @test n_valid == 1
+end
