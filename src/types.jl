@@ -202,7 +202,66 @@ struct DynLQGame # Dynamic Nash equilibrium problem
     end
 end
 
-
+#testing new struct
+struct StaticGNEGame
+    N::Int
+    n::Vector{Int}
+    Q::Vector{Vector{Matrix{Float64}}}
+    q::Vector{Vector{Float64}}
+    A_loc::Vector{Matrix{Float64}}
+    b_loc::Vector{Vector{Float64}}
+    A_sh::Vector{Matrix{Float64}}
+    b_sh::Vector{Float64}
+ 
+    function StaticGNEGame(
+        N::Int,
+        n::Vector{Int},
+        Q::Vector{Vector{Matrix{Float64}}},
+        q::Vector{Vector{Float64}},
+        A_loc::Vector{Matrix{Float64}},
+        b_loc::Vector{Vector{Float64}},
+        A_sh::Vector{Matrix{Float64}},
+        b_sh::Vector{Float64}
+    )
+        @assert N >= 2 "N must be at least 2 (Nash equilibrium requires multiple players)"
+        @assert length(n) == N "n must have length N (one dimension per player)"
+        @assert all(n .> 0) "All player dimensions n[i] must be positive"
+        
+        @assert length(Q) == 1 "Q must be a single-element vector containing the N×N block matrix"
+        @assert size(Q[1], 1) == N "Q[1] must be an N×N block matrix"
+        @assert size(Q[1], 2) == N "Q[1] must be an N×N block matrix"
+        for i in 1:N
+            for j in 1:N
+                @assert size(Q[1][i,j], 1) == n[i] "Q[1][$i,$j] must have n[$i]=$(n[i]) rows, got $(size(Q[1][i,j], 1))"
+                @assert size(Q[1][i,j], 2) == n[j] "Q[1][$i,$j] must have n[$j]=$(n[j]) columns, got $(size(Q[1][i,j], 2))"
+            end
+        end
+        
+        @assert length(q) == N "q must have length N (one vector per player)"
+        for i in 1:N
+            @assert length(q[i]) == n[i] "q[$i] must have length n[$i]=$(n[i]), got $(length(q[i]))"
+        end
+        
+        @assert length(A_loc) == N "A_loc must have length N"
+        @assert length(b_loc) == N "b_loc must have length N"
+        for i in 1:N
+            @assert size(A_loc[i], 2) == n[i] "A_loc[$i] must have n[$i]=$(n[i]) columns, got $(size(A_loc[i], 2))"
+            @assert size(A_loc[i], 1) == length(b_loc[i]) "A_loc[$i] has $(size(A_loc[i], 1)) rows but b_loc[$i] has length $(length(b_loc[i]))"
+        end
+        
+        @assert length(A_sh) == N "A_sh must have length N (one block per player)"
+        m_sh = size(A_sh[1], 1)
+        for i in 1:N
+            @assert size(A_sh[i], 1) == m_sh "All A_sh[i] must have m_sh=$m_sh rows. A_sh[$i] has $(size(A_sh[i], 1))"
+            @assert size(A_sh[i], 2) == n[i] "A_sh[$i] must have n[$i]=$(n[i]) columns, got $(size(A_sh[i], 2))"
+        end
+        
+        @assert length(b_sh) == m_sh "b_sh must have m_sh=$m_sh elements, got $(length(b_sh))"
+        
+        return new(N, n, Q, q, A_loc, b_loc, A_sh, b_sh)
+    end
+end
+ 
 struct mpAVI
     # VI(Hx + Fθ + f, Ax ≤ Bθ + b)
     # With θ ∈ { Cθ ≤ d } ∩ { lb ≤ θ ≤ ub }

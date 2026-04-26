@@ -78,3 +78,27 @@ function show_pwa_map(sol)
 end
 
 show_pwa_map(result::NamedTuple) = show_pwa_map(result.sol)
+
+function solve_gne_both(mpvi_dynect::DyNECT.mpAVI, mpvi)
+    sol = CommonSolve.solve(mpvi_dynect, DyNECT.ParametricDAQPSolver)
+    sol_unfiltered = deepcopy(sol)
+    filter_gne_crs!(sol, mpvi)
+    return (unfiltered=sol_unfiltered, filtered=sol)
+end
+
+function plot_gne_solution(sol, θlb, θub, title_str)
+    x_values     = []
+    theta_values = []
+    for θ in θlb[1]:0.02:θub[1]
+        x = DyNECT.evaluatePWA(sol, [θ])
+        if x !== nothing
+            push!(x_values, x)
+            push!(theta_values, θ)
+        end
+    end
+    x_array = hcat(x_values...)'
+    scatter(x_array[:, 1], x_array[:, 2], marker_z=theta_values,
+        xlabel="x1", ylabel="x2", label="", title=title_str,
+        colorbar_title="θ", right_margin=5Plots.mm)
+    display(plot!())
+end
