@@ -108,19 +108,24 @@ function StaticGNE2mpAVI(game::StaticGNEGame)
     # Assemble linear cost (f) from q vectors
     f = vcat(game.q...)
     
-    # Assemble local constraints
-    A_loc_blocks = []
-    b_loc_blocks = []
+    # Assemble local constraints (zero-pad each player's block to n_total columns)
+    A_loc_rows = []
+    b_loc_rows = []
+    col_offset = 0
     for i in 1:N
-        if size(game.A_loc[i], 1) > 0
-            push!(A_loc_blocks, game.A_loc[i])
-            push!(b_loc_blocks, game.b_loc[i])
+        m_i = size(game.A_loc[i], 1)
+        if m_i > 0
+            row = zeros(m_i, n_total)
+            row[:, col_offset+1:col_offset+n[i]] = game.A_loc[i]
+            push!(A_loc_rows, row)
+            push!(b_loc_rows, game.b_loc[i])
         end
+        col_offset += n[i]
     end
-    
-    if length(A_loc_blocks) > 0
-        A_loc = vcat(A_loc_blocks...)
-        b_loc = vcat(b_loc_blocks...)
+
+    if length(A_loc_rows) > 0
+        A_loc = vcat(A_loc_rows...)
+        b_loc = vcat(b_loc_rows...)
     else
         A_loc = zeros(0, n_total)
         b_loc = Float64[]
