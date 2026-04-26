@@ -2,9 +2,6 @@
 
 Static GNE formulation layer for DyNECT. Converts N-player quadratic static games into a multi-parametric Variational Inequality (mpVI) for GNE selection via PWA map computation, based on the Nabetani-Tseng-Fukushima parametrization.
 
-**Authors:** Stephanie Matta — stmb@kth.se  
-**Supervisors:** Emilio Benenati, Daniel T.
-
 ## Problem formulation
 
 Given a static N-player quadratic game, each player $i$ solves
@@ -87,3 +84,6 @@ show_solution(sol, mpvi)
 
 Inherits DyNECT dependencies. Additionally requires:
 - [Symbolics.jl](https://github.com/JuliaSymbolics/Symbolics.jl) (verbose version only)
+
+**Authors:** Stephanie Matta — stmb@kth.se  
+**Supervisors:** Emilio Benenati, Dániel Tihanyi.
