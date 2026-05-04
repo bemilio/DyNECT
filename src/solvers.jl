@@ -139,6 +139,8 @@ function CommonSolve.solve!(DR::DouglasRachford)
     return solution
 end
 
+
+
 # Log-domain interior point method [Liu, Liao-McPherson 2025]
 struct LogIPMSolver
     prob::AVI
@@ -642,6 +644,7 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     region_limit::Int64=Int(1e12),
     chunk_size::Int64=1000,
     factorization::Symbol=:chol,
+    pivot::Bool=false,
     postcheck_rank::Bool=true,
     lowdim_tol::Float64=0.,
     daqp_settings=Dict{Symbol,Any}())
@@ -657,6 +660,7 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
         region_limit,
         chunk_size,
         factorization,
+        pivot,
         postcheck_rank,
         lowdim_tol,
         daqp_settings)

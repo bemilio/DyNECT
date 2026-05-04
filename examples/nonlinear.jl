@@ -7,11 +7,12 @@ using DAQPBase
 # using BenchmarkTools
 using LinearAlgebra
 # using DynamicalSystems
-# using Plots
-# using CSV
-# using DataFrames
+using Plots
+using CSV
+using DataFrames
 # using CommonSolve
 using DynamicalSystems
+using Statistics
 using Random
 Random.seed!(1234)
 
@@ -19,20 +20,20 @@ include("overtake_utils.jl")
 
 # Parameters
 T_sim = 200 # Simulation length
-T_hor = 3
+T_hor = 10
 Δt = 0.1 #sampling time
-v_ref = [20., 25.] # reference speed for each agent 
-v_min = 10.
-v_max = 35.
-d_overtake = 10. # Distance at which overtake is initiated
-a_max = 5. # max acceleration
-a_min = -5.
+v_ref = [5., 7.] # reference speed for each agent in carlength/s. Car length is 3 m (defined in the plot script)
+v_min = 3.
+v_max = 10.
+d_overtake = 3. # Distance at which overtake is initiated, in car length-unit
+a_max = 1. # max acceleration
+a_min = -1.
 angle_max = pi / 32
 angle_min = -pi / 32
 l_ref = [0.5, -0.5] #reference lateral position for normal and overtake lane 
 
-dx_min = 5. # safety longitudinal distance
-dl_min = 0.7 # safety lateral distance
+dx_min = 2. # safety longitudinal distance, in car length-unit
+dl_min = 0.5 # safety lateral distance, 1=lane width
 
 # Fixed values
 N = 2
@@ -42,7 +43,7 @@ nx = 6
 ## Initialization
 
 # State:
-x0 = [0., (v_max + v_min) / 2, l_ref[1], -15., (v_max + v_min) / 2, l_ref[1]]
+x0 = [0., (v_max + v_min) / 2, l_ref[1], -5., (v_max + v_min) / 2, l_ref[1]]
 u0=[zeros(2), zeros(2)]
 
 # Dynamics
@@ -105,39 +106,37 @@ game = Dict(
     :Overtake => DyNECT.DynGame(f, J_overtake, gx, gu, gloc, nx, nu, 5, 1, [4,4], N),
 )
 
+# Warm up (to avoid compile times in the results)
+let
+    lq_game = DyNECT.LQapprox(game[:Platoon], [[zeros(nui) for nui in nu] for t in 1:T_hor] , x0, T_hor)
+    mpavi = DyNECT.DynLQGame2mpAVI(lq_game)
+    avi = DyNECT.AVI(mpavi, zeros(nx))
+    DAQPBase.avi(avi.H, avi.f, avi.A, avi.b, -Inf.*ones(length(avi.b)))
+end
 
 #### Simulations ####
-
-pv0 = [0., (v_max + v_min) / 2, l_ref[1], -15., (v_max + v_min) / 2, l_ref[1]]
-
 println("Simulating...")
-# Initialize storing vectors
-# x = zeros(6, T_sim) # position and velocity of two unicycles
-# u = zeros(4, T_sim) # input of two unicycles
-# elapsed_time = zeros(T_sim - 1)
-# residual = zeros(T_sim - 1)
-# Initialize values
+# Initialize 
+elapsed_time = zeros(T_sim - 1)
 xt = x0 # state at time T
-xsim = [zeros(nx) for t in 1:Tsim] # stores state along simulation
-xsim[0] .= x0
+xsim = [zeros(nx) for t in 1:T_sim] # stores state along simulation
+xsim[1] .= x0
 useq = [[zeros(nui) for nui in nu] for t in 1:T_hor] # Stores MPC-predicted sequence of inputs
 ut = [zeros(nui) for nui in nu] # input at time t
 case = :Platoon
 
 # Main loop
-for t in 1:T_sim
+for t in 1:T_sim-1
     global case
     # avi = DyNECT.AVI(mpVIs[Int(case)], x)
     lq_game = DyNECT.LQapprox(game[case], useq, xt, T_hor) # state/input are δx,δu: deviation from reference input/state
     mpavi = DyNECT.DynLQGame2mpAVI(lq_game)
     avi = DyNECT.AVI(mpavi, zeros(nx)) 
-    sol = @timed DAQPBase.avi(avi.H, avi.f, avi.A, avi.b, -Inf.*ones(length(avi.b)))
-    sol.time
-    exitflag = sol.value[3]
+    elapsed_time[t] = @elapsed sol = DAQPBase.avi(avi.H, avi.f, avi.A, avi.b, -Inf.*ones(length(avi.b)))
+    exitflag = sol[3]
     exitflag <0 && println("infeasible!, t=$t")
     exitflag >0 && println("OK, t=$t")
-
-    δuseq = DyNECT.arrange_vector_as_time_seq(sol.value[1], nu, N, T_hor)
+    δuseq = DyNECT.arrange_vector_as_time_seq(sol[1], nu, N, T_hor)
     # Apply bias
     useq .= useq .+ δuseq
     # Apply control
@@ -155,7 +154,7 @@ for t in 1:T_sim
     step!(agent2, Δt, true) # progress for Δt units of time
     xt[1:3] = current_state(agent1)
     xt[4:6] = current_state(agent2)
-    xsim[t] .= xt
+    xsim[t+1] .= xt
     println("[t=$t] xt= $xt")
 
     # Overtake logic
@@ -171,16 +170,36 @@ for t in 1:T_sim
 end
 
 
+is_constr_sat = all([all(gx(xsim[t]).<0.00001) for t in 1:T_hor-1])
+println("is_constr_sat = $is_constr_sat")
 # Prepare DataFrame
 pv_df = DataFrame(time=collect(0:T_sim-1) .* Δt,
-    p1=vstack([xsim[t][1] for t in 1:T_sim]...),
-    v1=vstack([xsim[t][2] for t in 1:T_sim]...),
-    l1=vstack([xsim[t][3] for t in 1:T_sim]...),
-    p2=vstack([xsim[t][4] for t in 1:T_sim]...),
-    v2=vstack([xsim[t][5] for t in 1:T_sim]...),
-    l2=vstack([xsim[t][6] for t in 1:T_sim]...)
+    p1=vcat([xsim[t][1] for t in 1:T_sim]...),
+    v1=vcat([xsim[t][2] for t in 1:T_sim]...),
+    l1=vcat([xsim[t][3] for t in 1:T_sim]...),
+    p2=vcat([xsim[t][4] for t in 1:T_sim]...),
+    v2=vcat([xsim[t][5] for t in 1:T_sim]...),
+    l2=vcat([xsim[t][6] for t in 1:T_sim]...),
+    dx_min=dx_min,
+    dl_min=dl_min
     )
 CSV.write("pos_vel_DataFrame.csv", pv_df)
 
+println("computation time: $(mean(elapsed_time)) ± $(std(elapsed_time)) ")
+
+t_elapsed = 1:T_sim-1
+p = plot(
+    t_elapsed,
+    elapsed_time;
+    xlabel = "time-step",
+    ylabel = "solve time [s]",
+    title = "Solver  time",
+    label = "elapsed_time",
+    lw = 2,
+    yscale = :log10
+)
 
 
+savefig(p, "elapsed_time.png")
+display(p)
+readline()

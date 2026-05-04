@@ -119,7 +119,7 @@ function drawRoad!(plt, x::AbstractVector{Float64}, y::AbstractVector{Float64}, 
 end
 
 
-function pos_in_road_to_abs_position(x, y, tangent_vecs, normal_vecs, position, lat_offset, road_width::Real; closed_loop_circuit=false)
+function pos_in_road_to_abs_position(x, y, tangent_vecs, normal_vecs, position, lat_offset, vehicle_length::Real, road_width::Real; closed_loop_circuit=false)
     ### given a position and lateral offset in curve-coordinates, find the actual position
     if closed_loop_circuit
         dx = diff([x; x[1]])
@@ -172,5 +172,33 @@ function drawRectangle!(plt, x::Real, y::Real, angle::Real, height::Real, width:
     rect_y = vcat(translated_corners[:, 2], translated_corners[1, 2])
 
     # Plot the rectangle
-    plot!(plt, rect_x, rect_y, color=color, fillalpha=0.2)
+    plot!(plt, 
+    rect_x, 
+    rect_y, 
+    seriestype=:shape,
+    color=color,
+    fillalpha=0.2,
+    linewidth=3,
+    linecolor=color)
+end
+
+function drawEllipse!(plt, x0, y0, a, b, color::Symbol)
+
+    # Parameter
+    t = range(0, 2π, length=400)
+
+    # Ellipse points
+    x = x0 .+ a .* cos.(t)
+    y = y0 .+ b .* sin.(t)
+
+    # Plot filled ellipse
+    plot!(plt, x, y,
+        color=color,
+        fill=(0, color),     # fill down to curve
+        fillalpha=0.3,       # transparency (0–1)
+        linecolor=color,
+        label=nothing
+    )
+
+    return plt
 end

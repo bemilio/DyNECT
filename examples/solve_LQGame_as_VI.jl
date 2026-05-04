@@ -34,7 +34,7 @@ b_u = zeros(0)
 # Construct game
 game = DynLQGameTI(
     A=A,
-    Bvec=B,
+    B=B,
     Q=Q,
     R=R,
     C_x=C_x,
