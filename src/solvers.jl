@@ -735,3 +735,48 @@ function CommonSolve.solve!(pDAQP::ParametricDAQPSolver)
                                           AS0  = pDAQP.AS0)
     return sol
 end
+
+
+### GNEP solvers
+
+struct StaticGNEpDAQPSolver
+    gnep::StaticGNEGame
+    mpavi::mpAVI
+    options::ParametricDAQP.Settings
+    status::Ref{Symbol}
+end
+
+function CommonSolve.init(gnep::StaticGNEGame, ::Type{StaticGNEpDAQPSolver}; θub=nothing, θlb=nothing)
+
+    options = ParametricDAQP.Settings(verbose=true)
+    mpavi = StaticGNE2mpAVI(gnep, θub=θub, θlb=θlb)
+    return StaticGNEpDAQPSolver(gnep, mpavi, options, Ref(:Initialized))
+
+end
+
+function CommonSolve.solve!(solver::StaticGNEpDAQPSolver)
+    mpAVI = solver.mpavi
+
+    # Interface to call pDAQP
+    raw = (
+        H = mpAVI.H,
+        F = mpAVI.F,
+        f = mpAVI.f,
+        A = mpAVI.A,
+        B = mpAVI.B,
+        b = mpAVI.b,
+    )
+
+    Θ = (A  = mpAVI.C',
+         b  = mpAVI.d,
+         ub = mpAVI.ub,
+         lb = mpAVI.lb)
+
+    (sol, info) = ParametricDAQP.mpsolve(raw, Θ;
+                                          opts = solver.options)
+    # Remove critical regions not associated to Nash equilibria
+    filter_gne_crs!(sol, solver.gnep)
+
+    return sol
+
+end
