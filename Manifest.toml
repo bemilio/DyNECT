@@ -2,7 +2,7 @@
 
 julia_version = "1.12.3"
 manifest_format = "2.0"
-project_hash = "98f15e52b7669dc075dea900af2fb241bd8857cd"
+project_hash = "3afe4c675d144be12e191aecb93438e085367723"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "f7304359109c768cf32dc5fa2d371565bb63b68a"
@@ -180,6 +180,12 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "1b96ea4a01afe0ea4090c5c8039690672dd13f2e"
 uuid = "6e34b625-4abd-537c-b88f-471c36dfa7a0"
 version = "1.0.9+0"
+
+[[deps.CDDLib]]
+deps = ["LinearAlgebra", "MathOptInterface", "Polyhedra", "SparseArrays", "cddlib_jll"]
+git-tree-sha1 = "bfd243c836ce98efac1a4b79fdfd1508189d143f"
+uuid = "3391f64e-dcde-5f30-b752-e11513730f60"
+version = "0.10.2"
 
 [[deps.ChainRulesCore]]
 deps = ["Compat", "LinearAlgebra"]
@@ -381,7 +387,7 @@ uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 version = "1.7.0"
 
 [[deps.DyNECT]]
-deps = ["BlockArrays", "BlockDiagonals", "Clarabel", "CommonSolve", "DAQP", "JuMP", "LinearAlgebra", "MatrixEquations", "Monviso", "ParametricDAQP", "SparseArrays"]
+deps = ["BlockArrays", "BlockDiagonals", "Clarabel", "CommonSolve", "DAQP", "JuMP", "LinearAlgebra", "MatrixEquations", "Monviso", "ParametricDAQP", "Polyhedra", "SparseArrays", "Symbolics"]
 path = "."
 uuid = "858066fe-dd44-4a3d-96f2-b51f0b4e43b3"
 version = "0.1.0"
@@ -468,6 +474,11 @@ version = "1.5.0"
 deps = ["Random"]
 uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
 version = "1.11.0"
+
+[[deps.GMP_jll]]
+deps = ["Artifacts", "Libdl"]
+uuid = "781609d7-10c4-51f6-84f2-b8444358ff6d"
+version = "6.3.0+2"
 
 [[deps.GPUArraysCore]]
 deps = ["Adapt"]
@@ -837,6 +848,22 @@ deps = ["DAQPBase", "LinearAlgebra", "PGFPlotsX", "RecipesBase"]
 git-tree-sha1 = "9045d131778e6f9f119e4b12916c12a95a719daf"
 uuid = "be5c70c9-e47a-4559-82a9-cba980583202"
 version = "0.3.6"
+
+[[deps.Polyhedra]]
+deps = ["GenericLinearAlgebra", "LinearAlgebra", "MathOptInterface", "MutableArithmetics", "SparseArrays", "StaticArrays"]
+git-tree-sha1 = "754bc39995daff07ed01d7ebdc8c9cf6681d241e"
+uuid = "67491407-f73d-577b-9b50-8179a7c68029"
+version = "0.8.1"
+
+    [deps.Polyhedra.extensions]
+    PolyhedraGeometryBasicsExt = "GeometryBasics"
+    PolyhedraJuMPExt = "JuMP"
+    PolyhedraRecipesBaseExt = "RecipesBase"
+
+    [deps.Polyhedra.weakdeps]
+    GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
+    JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+    RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
 
 [[deps.PreallocationTools]]
 deps = ["Adapt", "ArrayInterface", "PrecompileTools"]
@@ -1310,6 +1337,12 @@ version = "0.1.6"
 deps = ["Libdl"]
 uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
 version = "1.3.1+2"
+
+[[deps.cddlib_jll]]
+deps = ["Artifacts", "GMP_jll", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "08f5df03703af917b9bfec47b9767eb943220d08"
+uuid = "f07e07eb-5685-515a-97c8-3014f6152feb"
+version = "0.94.14+0"
 
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl"]
