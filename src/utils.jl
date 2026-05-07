@@ -89,12 +89,21 @@ The Nabetani-Tseng-Fukushima reparametrization transforms shared constraints int
  
 Returns: ``\text{VI}(H x + f, A x \leq B \theta + b)`` where ``\theta \in [\text{lb}, \text{ub}]``
 """
-function StaticGNE2mpAVI(game::StaticGNEGame)
+function StaticGNE2mpAVI(game::StaticGNEGame; θub::Union{Vector{Float64},Nothing}=nothing, θlb::Union{Vector{Float64},Nothing}=nothing)
+    # Infer dimensions
     N = game.N
     n = game.n
     n_total = sum(n)
     m_sh = length(game.b_sh)
     n_theta = (N - 1) * m_sh
+
+    # Check size of bounds
+    if !isnothing(θub) 
+        @assert length(θub)==(game.N-1) * m_sh "# of par. upper bounds is $((game.N-1) * m_sh), got $(length(θub))"
+    end
+    if !isnothing(θlb)
+        @assert length(θlb)==(game.N-1) * m_sh "# of par. low bounds is $((game.N-1) * m_sh), got $(length(θlb)) "
+    end
     
     # Assemble Hessian (H) from Q blocks 
     H = BlockArray{Float64}(undef_blocks, n, n)
@@ -158,7 +167,7 @@ function StaticGNE2mpAVI(game::StaticGNEGame)
     b = vcat(b_loc, d_g)
     
     # Return mpAVI
-    return mpAVI(H, zeros(n_total, n_theta), f, A, B, b)
+    return mpAVI(H, zeros(n_total, n_theta), f, A, B, b, ub=θub, lb=θlb)
 end
 
 @doc raw"""
