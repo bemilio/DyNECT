@@ -5,6 +5,7 @@ version = "0.1.0"
 [deps]
 BlockArrays = "8e7c35d0-a365-5155-bbbb-fb81a777f24e"
 BlockDiagonals = "0a1fb500-61f7-11e9-3c65-f5ef3456f9f0"
+CDDLib = "3391f64e-dcde-5f30-b752-e11513730f60"
 Clarabel = "61c947e1-3e6d-4ee4-985a-eec8c727bd6e"
 CommonSolve = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
 DAQP = "c47d62df-3981-49c8-9651-128b1cd08617"
@@ -13,12 +14,9 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MatrixEquations = "99c1a7ee-ab34-5fd5-8076-27c950a045f4"
 Monviso = "1eb86b62-9073-48e6-9f04-fc5a45567986"
 ParametricDAQP = "19f72acb-e2a9-45c8-96b9-4d5487c8db2e"
+Polyhedra = "67491407-f73d-577b-9b50-8179a7c68029"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
-
-[compat]
-ParametricDAQP = "0.4.9"
-Symbolics = "6.58.0"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

@@ -214,37 +214,36 @@ struct StaticGNEGame
     b_sh::Vector{Float64}
  
     function StaticGNEGame(
-        N::Int,
-        n::AbstractVector{<:Integer},
-        Q::AbstractVector,
+        Q::Vector{Vector{Matrix{Float64}}},
         q::AbstractVector,
         A_loc::AbstractVector,
         b_loc::AbstractVector,
         A_sh::AbstractVector,
         b_sh::AbstractVector{<:Real}
     )
+        # Infer number of agents
+        N = length(Q)
+        # Infer size of decision variables
+        n = [size(Q[i][i], 1) for i in 1:N]
         @assert N >= 2 "N must be at least 2 (Nash equilibrium requires multiple players)"
-        @assert length(n) == N "n must have length N (one dimension per player)"
         @assert all(n .> 0) "All player dimensions n[i] must be positive"
-        
-        @assert length(Q) == N "Q must have length N (one block-row per player)"
+        @assert all(length(Qi) == N for Qi in Q) "Each element of Q must have length $(N) (one matrix per agent)"
         for i in 1:N
-            @assert length(Q[i]) == N "Q[$i] must have length N (one block per opponent)"
             for j in 1:N
                 @assert size(Q[i][j], 1) == n[i] "Q[$i][$j] must have n[$i]=$(n[i]) rows, got $(size(Q[i][j], 1))"
                 @assert size(Q[i][j], 2) == n[j] "Q[$i][$j] must have n[$j]=$(n[j]) columns, got $(size(Q[i][j], 2))"
             end
         end
         
-        @assert length(q) == N "q must have length N (one vector per player)"
+        @assert length(q) == N "q must have length N (one vector per player), got $(length(q))"
         for i in 1:N
             @assert length(q[i]) == n[i] "q[$i] must have length n[$i]=$(n[i]), got $(length(q[i]))"
         end
         
-        @assert length(A_loc) == N "A_loc must have length N"
-        @assert length(b_loc) == N "b_loc must have length N"
+        @assert length(A_loc) == N "A_loc must have length N (one matrix per agent)"
+        @assert length(b_loc) == N "b_loc must have length N (one matrix per agent)"
         for i in 1:N
-            @assert size(A_loc[i], 2) == n[i] "A_loc[$i] must have n[$i]=$(n[i]) columns, got $(size(A_loc[i], 2))"
+            @assert size(A_loc[i], 2) == n[i] "A_loc[$i] must have $(n[i]) columns, got $(size(A_loc[i], 2))"
             @assert size(A_loc[i], 1) == length(b_loc[i]) "A_loc[$i] has $(size(A_loc[i], 1)) rows but b_loc[$i] has length $(length(b_loc[i]))"
         end
         
@@ -256,12 +255,12 @@ struct StaticGNEGame
         end
         
         @assert length(b_sh) == m_sh "b_sh must have m_sh=$m_sh elements, got $(length(b_sh))"
-        
+
         return new(N, n, Q, q, A_loc, b_loc, A_sh, b_sh)
     end
 
-    function StaticGNEGame(; N, n, Q, q, A_loc, b_loc, A_sh, b_sh)
-        StaticGNEGame(N, n, Q, q, A_loc, b_loc, A_sh, b_sh)
+    function StaticGNEGame(; Q, q, A_loc, b_loc, A_sh, b_sh)
+        StaticGNEGame(Q, q, A_loc, b_loc, A_sh, b_sh)
     end
 end
  
