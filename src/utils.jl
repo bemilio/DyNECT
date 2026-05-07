@@ -102,7 +102,7 @@ function StaticGNE2mpAVI(game::StaticGNEGame; θub::Union{Vector{Float64},Nothin
         @assert length(θub)==(game.N-1) * m_sh "# of par. upper bounds is $((game.N-1) * m_sh), got $(length(θub))"
     end
     if !isnothing(θlb)
-        @assert length(θlb)==(game.N-1) * m_sh "# of par. low bounds is $((game.N-1) * m_sh), got $(length(θb)) "
+        @assert length(θlb)==(game.N-1) * m_sh "# of par. low bounds is $((game.N-1) * m_sh), got $(length(θlb)) "
     end
     
     # Assemble Hessian (H) from Q blocks 
