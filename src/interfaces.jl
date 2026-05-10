@@ -1,3 +1,4 @@
+using ForwardDiff, SparseArrays
 
 # ParametricDAQP Interface
 
@@ -57,4 +58,67 @@ function filter_gne_crs!(sol::ParametricDAQP.Solution, game::StaticGNEGame) #tes
         return true
     end
     return length(sol.CRs)
+end
+
+#added Optimal GNE selection
+function select_optimal_gne!(
+    sol::ParametricDAQP.Solution,
+    φ::Function
+)::OptimalGNEResult
+    
+    candidates = []
+    
+    for k in 1:length(sol.CRs)
+        CR_k = sol.CRs[k]
+        
+        # Extract region geometry
+        # Ath has shape n_θ × m_k; constraint is Ath'θ ≤ bth (see find_CR)
+        A_k = CR_k.Ath'  # m_k × n_θ
+        b_k = CR_k.bth
+        n_θ = size(A_k, 2)
+        
+        # Extract affine map: u = M_k θ + d_k from CR.z' * [θ; 1]
+        # CR.z is (n_θ+1) × n_u, so:
+        M_k = CR_k.z[1:end-1, :]'  # n_u × n_θ
+        d_k = vec(CR_k.z[end, :])   # n_u
+        
+        try
+            # Define composite function: ψ(θ) = φ(M_k θ + d_k)
+            ψ(θ::Vector) = φ(M_k * θ + d_k)
+            
+            # Compute Hessian and gradient via AD
+            H_θ = ForwardDiff.hessian(ψ, zeros(n_θ))
+            g_θ = ForwardDiff.gradient(ψ, zeros(n_θ))
+            
+            # Solve convex QP: min_θ 0.5*θ'*H_θ*θ + g_θ'*θ  s.t. A_k θ ≤ b_k
+            qp = Clarabel.Solver()
+            settings = Clarabel.Settings(verbose=false)
+            cone = [Clarabel.NonnegativeConeT(size(A_k, 1))]
+            
+            Clarabel.setup!(qp, SparseMatrixCSC(H_θ), g_θ, 
+                           SparseMatrixCSC(A_k), b_k, cone, settings)
+            result = Clarabel.solve!(qp)
+            
+            if result.status == Clarabel.SOLVED
+                θ_k = result.x[1:n_θ]
+                u_k = M_k * θ_k + d_k
+                φ_k = φ(u_k)
+                push!(candidates, (θ=θ_k, u=u_k, φ=φ_k, region=k))
+            end
+            
+        catch e
+            continue
+        end
+    end
+    
+    if isempty(candidates)
+        error("[select_optimal_gne!] No regions solved successfully.")
+    end
+    
+    # Global selection: pick best φ
+    φ_values = [c.φ for c in candidates]
+    k_best = argmin(φ_values)
+    best = candidates[k_best]
+    
+    return OptimalGNEResult(best.θ, best.u, best.φ, best.region, candidates)
 end

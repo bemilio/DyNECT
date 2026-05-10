@@ -375,3 +375,21 @@ function IterativeSolverParams(; max_iter::Int=10000,
     time_limit::Float64=1e2)
     return IterativeSolverParams(max_iter, stepsize, tol, warmstart, verbose, time_limit)
 end
+
+#added optimal GNE selection
+struct OptimalGNEResult
+    θ_star::Vector{Float64} #Optimal parameter value
+    u_star::Vector{Float64} #Optimal equilibrium (GNE)  
+    φ_star::Float64         #Performance metric value
+    region_id::Int          #Which critical region contained optimum
+    all_candidates::Vector  #All regional candidates for analysis
+end
+
+function Base.show(io::IO, result::OptimalGNEResult)
+    println(io, "OptimalGNEResult")
+    println(io, "  θ*: $(round.(result.θ_star; digits=6))")
+    println(io, "  u*: $(round.(result.u_star; digits=6))")
+    println(io, "  φ*: $(round(result.φ_star; digits=8))")
+    println(io, "  region: $(result.region_id)")
+    println(io, "  candidates: $(length(result.all_candidates))")
+end
