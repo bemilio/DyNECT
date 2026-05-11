@@ -2,7 +2,7 @@
 
 julia_version = "1.12.3"
 manifest_format = "2.0"
-project_hash = "ca114b719e11ea9433e8bddf13cca0ad22afdacc"
+project_hash = "57c434b7d749ad974da14f17478dfc755813d010"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "bbc22a9a08a0ef6460041086d8a7b27940ed4ffd"
@@ -359,7 +359,7 @@ uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 version = "1.7.0"
 
 [[deps.DyNECT]]
-deps = ["BlockArrays", "BlockDiagonals", "CDDLib", "Clarabel", "CommonSolve", "DAQP", "JuMP", "LinearAlgebra", "MatrixEquations", "Monviso", "ParametricDAQP", "Polyhedra", "SparseArrays", "Symbolics"]
+deps = ["BlockArrays", "BlockDiagonals", "CDDLib", "Clarabel", "CommonSolve", "DAQP", "ForwardDiff", "JuMP", "LinearAlgebra", "MatrixEquations", "Monviso", "ParametricDAQP", "Polyhedra", "SparseArrays", "Symbolics"]
 path = "."
 uuid = "858066fe-dd44-4a3d-96f2-b51f0b4e43b3"
 version = "0.1.0"
