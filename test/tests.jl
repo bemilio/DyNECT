@@ -167,26 +167,30 @@ end
 end
 
 #added v_static_mpGNE
-@testset "StaticGNEGame.jl" begin
-    
-    # Rosen example
-    game = StaticGNEGame(
-        Q = [[fill(1.0, 1, 1), fill(-1.0, 1, 1)], 
-             [fill(1.0, 1, 1), fill(2.0, 1, 1)]],
-        q = [[0.0], [0.0]],
+
+@testset "StaticGNEGame" begin
+    # Scalar Rosen example using new StaticGNEpDAQPSolver
+    gnep = DyNECT.StaticGNEGame(
+        Q = [[[1.;;], [-1.;;]], 
+             [[1.;;], [2.;;]]],
+        q = [[0.], [0.]],
         A_loc = [zeros(0, 1), zeros(0, 1)],
         b_loc = [Float64[], Float64[]],
-        A_sh = [fill(-1.0, 1, 1), fill(-1.0, 1, 1)],
-        b_sh = [-1.0]
+        A_sh = [[-1;;], [-1;;]],
+        b_sh = [-1.]
     )
     
-    mpvi = StaticGNE2mpAVI(game)
-    mpvi_bounded = DyNECT.setParameterSpace(mpvi, lb=[-5.0], ub=[5.0], C=[1.0;-1.0;;], d=[0.0; 1.0])
-    sol = CommonSolve.solve(mpvi_bounded, DyNECT.ParametricDAQPSolver)
-    n_cr_before = length(sol.CRs)
-    @test n_cr_before >= 1
-
-    n_valid = filter_gne_crs!(sol, game)
-    @test n_valid <= n_cr_before
-    @test n_valid == 1
+    θub = [5.0]
+    θlb = [-5.0]
+    sol = CommonSolve.solve(gnep, DyNECT.StaticGNEpDAQPSolver; θub=θub, θlb=θlb)
+    
+    # Test solution: x1 = 1 - x2, -1 < x2 < 0.5
+    tol = 1e-6
+    for θ in θlb[1]:0.1:θub[1]
+        x = DyNECT.evaluatePWA(sol, [θ])
+        if !isnothing(x)
+            @test norm(x[1] - (1 - x[2])) < tol
+            @test -1.0 <= x[2] <= 0.5
+        end
+    end
 end

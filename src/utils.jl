@@ -102,7 +102,7 @@ function StaticGNE2mpAVI(game::StaticGNEGame; θub::Union{Vector{Float64},Nothin
         @assert length(θub)==(game.N-1) * m_sh "# of par. upper bounds is $((game.N-1) * m_sh), got $(length(θub))"
     end
     if !isnothing(θlb)
-        @assert length(θlb)==(game.N-1) * m_sh "# of par. low bounds is $((game.N-1) * m_sh), got $(length(θb)) "
+        @assert length(θlb)==(game.N-1) * m_sh "# of par. low bounds is $((game.N-1) * m_sh), got $(length(θlb)) "
     end
     
     # Assemble Hessian (H) from Q blocks 
@@ -120,23 +120,23 @@ function StaticGNE2mpAVI(game::StaticGNEGame; θub::Union{Vector{Float64},Nothin
     # Assemble local constraints
     A_loc = BlockDiagonal(game.A_loc)
     b_loc = vcat(game.b_loc...)
-    
+
     # Assemble Nabetani reparametrization
     # A_hat = blkdiag(A_sh[1], A_sh[2], ..., A_sh[N])
     A_hat_blocks = [game.A_sh[i] for i in 1:N]
     A_hat = BlockDiagonal(A_hat_blocks)
     A_hat = Matrix(A_hat)
     
-    # B_g structure: [I; -I; -I; ...; -I] (N blocks, (N-1)m_sh columns)
-    B_g_blocks = []
-    push!(B_g_blocks, I(m_sh))
-    for i in 2:N
-        push!(B_g_blocks, -I(m_sh))
-    end
-    B_g = vcat(B_g_blocks...)
+    # B_g structure (correct for N ≥ 2):
+    # Shape: (N*m_sh) × ((N-1)*m_sh)
+    # Top block: I_{(N-1)*m_sh}    (agents 1,...,N-1 get explicit allocation θ)
+    # Bottom block: -ones(m_sh, (N-1)*m_sh)  (agent N gets remainder)
+    B_g_top = I((N - 1) * m_sh)
+    B_g_bottom = -ones(m_sh, (N - 1) * m_sh)
+    B_g = vcat(B_g_top, B_g_bottom)
     
-    # d_g = [0; 0; ...; 0; b_sh]  (first (N-1)*m_sh rows zero, last m_sh rows b_sh)
-    d_g = vcat([zeros(m_sh * (N - 1)); game.b_sh]...)
+    # d_g = [zeros((N-1)*m_sh); b_sh]
+    d_g = vcat(zeros((N - 1) * m_sh), game.b_sh)
     
     # Stack all constraints 
     A = vcat(A_loc, A_hat)
