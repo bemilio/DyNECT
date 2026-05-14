@@ -118,22 +118,8 @@ function StaticGNE2mpAVI(game::StaticGNEGame; θub::Union{Vector{Float64},Nothin
     f = vcat(game.q...)
     
     # Assemble local constraints
-    A_loc_blocks = []
-    b_loc_blocks = []
-    for i in 1:N
-        if size(game.A_loc[i], 1) > 0
-            push!(A_loc_blocks, game.A_loc[i])
-            push!(b_loc_blocks, game.b_loc[i])
-        end
-    end
-    
-    if length(A_loc_blocks) > 0
-        A_loc = vcat(A_loc_blocks...)
-        b_loc = vcat(b_loc_blocks...)
-    else
-        A_loc = zeros(0, n_total)
-        b_loc = Float64[]
-    end
+    A_loc = BlockDiagonal(game.A_loc)
+    b_loc = vcat(game.b_loc...)
     
     # Assemble Nabetani reparametrization
     # A_hat = blkdiag(A_sh[1], A_sh[2], ..., A_sh[N])
@@ -153,6 +139,7 @@ function StaticGNE2mpAVI(game::StaticGNEGame; θub::Union{Vector{Float64},Nothin
     d_g = vcat([zeros(m_sh * (N - 1)); game.b_sh]...)
     
     # Stack all constraints 
+    println(" A_loc = $(A_loc), A_hat = $(A_hat) ")
     A = vcat(A_loc, A_hat)
     
     # B matrix: local constraints have no theta dependence (zeros), shared constraints have B_g

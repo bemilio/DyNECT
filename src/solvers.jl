@@ -646,20 +646,22 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     lowdim_tol::Float64=0.,
     daqp_settings=Dict{Symbol,Any}())
 
-    options = ParametricDAQP.Settings(eps_zero,
-        verbose,
-        store_AS,
-        store_points,
-        store_regions,
-        store_dual,
-        remove_redundant,
-        time_limit,
-        region_limit,
-        chunk_size,
-        factorization,
-        postcheck_rank,
-        lowdim_tol,
-        daqp_settings)
+    options = ParametricDAQP.Settings(Dict{Symbol,Any}(
+        :eps_zero => eps_zero,
+        :verbose => verbose,
+        :store_AS => store_AS,
+        :store_points => store_points,
+        :store_regions => store_regions,
+        :store_dual => store_dual,
+        :remove_redundant => remove_redundant,
+        :time_limit => time_limit,
+        :region_limit => region_limit,
+        :chunk_size => chunk_size,
+        :factorization => factorization,
+        :postcheck_rank => postcheck_rank,
+        :lowdim_tol => lowdim_tol,
+        :daqp_settings => daqp_settings,
+    ))
 
 
     # Solve feasibility problem in (x,θ)-space to find initial active set:

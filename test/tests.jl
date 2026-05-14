@@ -171,7 +171,6 @@ end
     
     # Rosen example
     game = StaticGNEGame(
-        N = 2, n = [1, 1],
         Q = [[fill(1.0, 1, 1), fill(-1.0, 1, 1)], 
              [fill(1.0, 1, 1), fill(2.0, 1, 1)]],
         q = [[0.0], [0.0]],
