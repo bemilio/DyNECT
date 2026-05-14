@@ -139,7 +139,6 @@ function StaticGNE2mpAVI(game::StaticGNEGame; θub::Union{Vector{Float64},Nothin
     d_g = vcat([zeros(m_sh * (N - 1)); game.b_sh]...)
     
     # Stack all constraints 
-    println(" A_loc = $(A_loc), A_hat = $(A_hat) ")
     A = vcat(A_loc, A_hat)
     
     # B matrix: local constraints have no theta dependence (zeros), shared constraints have B_g
