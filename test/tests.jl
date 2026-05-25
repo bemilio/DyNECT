@@ -165,3 +165,64 @@ end
 
     @test norm(u_inf - u) < 1e-5
 end
+
+@testset "infinite_horizon_CLNE.jl" begin
+    using Random
+    Random.seed!(1)
+
+    nx = 3
+    N = 3
+    nu = [2, 3, 4]
+    T_hor = 2
+
+    A = rand(nx, nx)
+    Bvec = [rand(nx, nu[j]) for j in 1:N]
+    Q = Vector{Matrix{Float64}}(undef, N)
+    for i = 1:N
+        Q[i] = 0.1 * rand(nx, nx) + Matrix{Float64}(I(nx))
+        Q[i] = Q[i] + Q[i]'
+    end
+    # Define R_i with only non-zero element (i,i)
+    R = [[zeros(nu[i], nu[j]) for j in 1:N] for i in 1:N]
+    for i in 1:N
+        R[i][i] .= Matrix{Float64}(1.0 * I(nu[i]))
+    end
+
+    # No Constraints
+    C_x = zeros(0, nx)
+    b_x = zeros(0)
+
+    C_loc_vec = [zeros(0, nu[i]) for i in 1:N]
+    b_loc_vec = [zeros(0) for i in 1:N]
+
+    C_u_vec = [zeros(0, nu[i]) for i in 1:N]
+    b_u = zeros(0)
+
+    prob = DynLQGame(
+        A=A,
+        Bvec=Bvec,
+        Q=Q,
+        R=R,
+        C_x=C_x,
+        b_x=b_x,
+        C_loc_vec=C_loc_vec,
+        b_loc_vec=b_loc_vec,
+        C_u_vec=C_u_vec,
+        b_u=b_u)
+
+    x = 10 * rand(nx)
+
+    # Solve infinite horizon problem 
+    P, K = DyNECT.solveCLNE(prob)
+
+    # Test solution
+    riccati_residual = 0.0
+    for i in 1:N
+        Acl_i = A + sum(Bvec[j] * K[j] for j in 1:N) - Bvec[i] * K[i]
+        _, _, K_ared, _, _ = ared(Acl_i, Bvec[i], R[i][i], Q[i], zeros(nx, nu[i]))
+        K_ared = -K_ared
+        riccati_residual = riccati_residual + norm(K[i] - K_ared)
+    end
+    @test riccati_residual < 1e-5
+    
+end

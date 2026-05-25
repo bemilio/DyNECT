@@ -4,11 +4,11 @@ function solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
     if any(norm(qi) > 1e-5 for qi in game.q) ||
        any(norm(ri) > 1e-5 for ri in game.r) ||
        norm(game.c) > 1e-5
-        throw(ErrorException("Affine part in objective or dynamics is not supported for the infinite-horizon OLNE solution."))
+        @warn "Affine part in objective or dynamics is not supported for the infinite-horizon OLNE solution and will be ignored."
     end
 
     if any(norm(game.R[i][j]) > 1e-5 && i != j for i in 1:game.N for j in 1:game.N)
-        throw(ErrorException("Cross-weights between input objectives (off-diagonal elements in R) are not supported for the infinite-horizon OLNE solution."))
+        @warn "Cross-weights between input objectives (off-diagonal elements in R) are not supported for the infinite-horizon OLNE solution and will be ignored."
     end
 
     #  Check if basic assumptions are satisfied
@@ -85,4 +85,51 @@ function solveExtendedARE(game::DynLQGame, K::Vector{<:AbstractMatrix})
         P_ext[i], _, K_ext[i], _, _ = ared(A_ext, B_ext, R_ext, Q_ext, zeros(2 * nx, game.nu[i]))
     end
     return P_ext, K_ext
+end
+
+function solveCLNE(game::DynLQGame; max_iter=1000, stepsize=0.1)
+    if any(norm(qi) > 1e-5 for qi in game.q) ||
+       any(norm(ri) > 1e-5 for ri in game.r) ||
+       norm(game.c) > 1e-5
+        @warn "Affine part in objective or dynamics is not supported for the infinite-horizon CLNE solution and will be ignored."
+    end
+
+    if any(norm(game.R[i][j]) > 1e-5 && i != j for i in 1:game.N for j in 1:game.N)
+        @warn "Cross-weights between input objectives (off-diagonal elements in R) are not supported for the infinite-horizon CLNE solution and will be ignored."
+    end
+
+    # Initialize to collaborative LQR
+    _, _, K_collab, _,_ = ared(game.A, hcat(game.Bi...), Matrix{Float64}(I, sum(game.nu), sum(game.nu)), Matrix(I, game.nx, game.nx), zeros(game.nx, sum(game.nu)))
+    K_collab = - K_collab
+    eps_err = 1e-5
+
+    idx = cumsum([1; game.nu])
+    K = [K_collab[idx[i]:(idx[i+1]-1), :] for i in 1:game.N]
+    P = [zeros(game.nx, game.nx) for _ in 1:game.N]
+    
+    for k=1:max_iter
+        for i in 1:game.N
+            # println("Solving are, iter. $k, agent $i")
+            Acl_i = game.A + sum(game.Bi[j] * K[j] for j in 1:game.N) - game.Bi[i] * K[i]
+            P[i], _, K_ared, _, _ = ared(Acl_i, game.Bi[i], game.R[i][i], game.Q[i], zeros(game.nx, game.nu[i]))
+            K_ared = -K_ared
+            K[i] = (1 - stepsize) * K[i] + stepsize * K_ared
+        end
+        # Test solution: Check residual from simultaneous ARE solution
+        riccati_residual = 0.0
+
+        for i in 1:game.N
+            Acl_i = game.A + sum(game.Bi[j] * K[j] for j in 1:game.N) - game.Bi[i] * K[i]
+            _, _, K_ared, _, _ = ared(Acl_i, game.Bi[i], game.R[i][i], game.Q[i], zeros(game.nx, game.nu[i]))
+            K_ared = -K_ared
+            riccati_residual = riccati_residual + norm(K[i] - K_ared)
+        end
+
+        if riccati_residual < eps_err
+            break
+        end
+    end
+
+    return P, K
+
 end
