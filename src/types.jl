@@ -203,7 +203,7 @@ struct DynLQGame # Dynamic Nash equilibrium problem
 end
 
 #added v_static_mpGNE
-struct StaticGNEGame
+struct StaticGNEGame #
     N::Int
     n::Vector{Int}
     Q::Vector{Vector{Matrix{Float64}}}
@@ -256,15 +256,15 @@ struct StaticGNEGame
         
         @assert length(b_sh) == m_sh "b_sh must have m_sh=$m_sh elements, got $(length(b_sh))"
 
-        return new(N, n, Q, q, A_loc, b_loc, A_sh, b_sh)
-    end
+        return new(N, n, Q, q, A_loc, b_loc, A_sh, b_sh) 
+    end 
 
-    function StaticGNEGame(; Q, q, A_loc, b_loc, A_sh, b_sh)
-        StaticGNEGame(Q, q, A_loc, b_loc, A_sh, b_sh)
-    end
-end
+    function StaticGNEGame(; Q, q, A_loc, b_loc, A_sh, b_sh) 
+        StaticGNEGame(Q, q, A_loc, b_loc, A_sh, b_sh) 
+    end 
+end #
  
-struct mpAVI
+struct mpAVI #src usage
     # VI(Hx + Fθ + f, Ax ≤ Bθ + b)
     # With θ ∈ { Cθ ≤ d } ∩ { lb ≤ θ ≤ ub }
     H::AbstractMatrix # size = n_x * n_x
@@ -321,7 +321,7 @@ struct mpAVI
 
         return new(H, F, f, A, B, b, C, d, ub, lb, n, m, n_θ)
     end
-end
+end #
 
 
 
@@ -376,7 +376,7 @@ function IterativeSolverParams(; max_iter::Int=10000,
     return IterativeSolverParams(max_iter, stepsize, tol, warmstart, verbose, time_limit)
 end
 
-#added optimal GNE selection
+#added optimal GNE selection #usage
 struct OptimalGNEResult
     θ_star::Vector{Float64} #Optimal parameter value
     u_star::Vector{Float64} #Optimal equilibrium (GNE)  
