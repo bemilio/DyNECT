@@ -17,6 +17,7 @@ include("interfaces.jl")
 using CommonSolve
 include("solvers.jl")
 export DynLQGame, DynLQGame2mpAVI
+import CommonSolve: solve  #Needed to override the 'solve' exported by DAQP
 export solve
 
 end
