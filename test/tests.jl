@@ -182,7 +182,8 @@ end
     
     θub = [5.0]
     θlb = [-5.0]
-    sol = CommonSolve.solve(gnep, DyNECT.mpGNESolver; θub=θub, θlb=θlb)
+    sol = CommonSolve.solve(gnep, DyNECT.mpGNESolver; θub = θub, θlb = θlb, params=DyNECT.IterativeSolverParams(warmstart=:UnconstrainedSolution))
+
     
     # Test solution: x1 = 1 - x2, -1 < x2 < 0.5
     tol = 1e-6

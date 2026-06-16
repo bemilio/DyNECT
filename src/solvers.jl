@@ -748,12 +748,33 @@ struct mpGNESolver
     status::Ref{Symbol}
 end
 
-function CommonSolve.init(gnep::StaticGNEGame, ::Type{mpGNESolver}; θub=nothing, θlb=nothing)
-
+function CommonSolve.init(gnep::StaticGNEGame, ::Type{mpGNESolver}; 
+    θub=nothing, 
+    θlb=nothing,
+    params::IterativeSolverParams=IterativeSolverParams())
+    
     options = ParametricDAQP.Settings(verbose=true)
     mpavi = StaticGNE2mpAVI(gnep, θub=θub, θlb=θlb)
+    
+    # Warm-start: defrost numerically if requested
+if params.warmstart == :UnconstrainedSolution
+    gnep_warmstart = StaticGNEGame(
+        A_loc = [[-1.0;;], [-1.0;;]],
+        b_loc = [[1.0], [1.0]],
+        A_sh = [[1.0;;], [1.0;;]],
+        b_sh = [100.0],
+        Q = [[Matrix(1.0I, 1, 1), zeros(1, 1)], [zeros(1, 1), Matrix(1.0I, 1, 1)]],
+        q = [[0.0], [0.0]]
+    )
+    # Warm-start with verbose=false to avoid confusing output
+    options_warmstart = ParametricDAQP.Settings(verbose=false)
+    solver_warmstart = mpGNESolver(gnep_warmstart, StaticGNE2mpAVI(gnep_warmstart), options_warmstart, Ref(:Initialized))
+    _ = CommonSolve.solve!(solver_warmstart)  # Silent warm-start
+elseif params.warmstart != :NoWarmStart
+    @warn "[mpGNESolver] Requested warmstart $(params.warmstart) not implemented. Using no warm-start."
+end
+    
     return mpGNESolver(gnep, mpavi, options, Ref(:Initialized))
-
 end
 
 function CommonSolve.solve!(solver::mpGNESolver)
@@ -774,11 +795,10 @@ function CommonSolve.solve!(solver::mpGNESolver)
          ub = mpAVI.ub,
          lb = mpAVI.lb)
 
-    (sol, info) = ParametricDAQP.mpsolve(raw, Θ;
-                                          opts = solver.options)
+    (sol, info) = ParametricDAQP.mpsolve(raw, Θ; opts = solver.options)
+    
     # Remove critical regions not associated to Nash equilibria
     filter_gne_crs!(sol, solver.gnep)
 
     return sol
-
 end
