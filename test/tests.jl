@@ -167,6 +167,7 @@ end
 end
 
 #added v_static_mpGNE
+
 @testset "StaticGNEGame" begin
     # Scalar Rosen example using new StaticGNEpDAQPSolver
     gnep = DyNECT.StaticGNEGame(

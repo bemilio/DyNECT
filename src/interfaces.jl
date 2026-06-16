@@ -107,6 +107,7 @@ function select_optimal_gne!(
             end
             
         catch e
+            @warn "[select_optimal_gne!] Region $k skipped: $e"
             continue
         end
     end

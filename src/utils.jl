@@ -117,29 +117,10 @@ function StaticGNE2mpAVI(game::StaticGNEGame; θub::Union{Vector{Float64},Nothin
     # Assemble linear cost (f) from q vectors
     f = vcat(game.q...)
     
-    # Assemble local constraints (zero-pad each player's block to n_total columns)
-    A_loc_rows = []
-    b_loc_rows = []
-    col_offset = 0  
-    for i in 1:N
-        m_i = size(game.A_loc[i], 1) 
-        if m_i > 0
-            row = zeros(m_i, n_total)
-            row[:, col_offset+1:col_offset+n[i]] = game.A_loc[i]
-            push!(A_loc_rows, row)
-            push!(b_loc_rows, game.b_loc[i])
-        end
-        col_offset += n[i]
-    end
+    # Assemble local constraints
+    A_loc = BlockDiagonal(game.A_loc)
+    b_loc = vcat(game.b_loc...)
 
-    if length(A_loc_rows) > 0
-        A_loc = vcat(A_loc_rows...)
-        b_loc = vcat(b_loc_rows...)
-    else
-        A_loc = zeros(0, n_total)
-        b_loc = Float64[]
-    end
-    
     # Assemble Nabetani reparametrization
     # A_hat = blkdiag(A_sh[1], A_sh[2], ..., A_sh[N])
     A_hat_blocks = [game.A_sh[i] for i in 1:N]

@@ -44,6 +44,3 @@ for xk in x_sol
 end
 
 println("All test_ok are true: ", all_test_ok)
-
-
-
