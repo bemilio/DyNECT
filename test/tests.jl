@@ -169,7 +169,7 @@ end
 #added v_static_mpGNE
 
 @testset "StaticGNEGame" begin
-    # Scalar Rosen example using new StaticGNEpDAQPSolver
+    # Scalar Rosen example using new mpGNESolver
     gnep = DyNECT.StaticGNEGame(
         Q = [[[1.;;], [-1.;;]], 
              [[1.;;], [2.;;]]],
@@ -182,7 +182,7 @@ end
     
     θub = [5.0]
     θlb = [-5.0]
-    sol = CommonSolve.solve(gnep, DyNECT.StaticGNEpDAQPSolver; θub=θub, θlb=θlb)
+    sol = CommonSolve.solve(gnep, DyNECT.mpGNESolver; θub=θub, θlb=θlb)
     
     # Test solution: x1 = 1 - x2, -1 < x2 < 0.5
     tol = 1e-6

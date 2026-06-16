@@ -741,22 +741,22 @@ end
 
 ### GNEP solvers
 
-struct StaticGNEpDAQPSolver
+struct mpGNESolver
     gnep::StaticGNEGame
     mpavi::mpAVI
     options::ParametricDAQP.Settings
     status::Ref{Symbol}
 end
 
-function CommonSolve.init(gnep::StaticGNEGame, ::Type{StaticGNEpDAQPSolver}; θub=nothing, θlb=nothing)
+function CommonSolve.init(gnep::StaticGNEGame, ::Type{mpGNESolver}; θub=nothing, θlb=nothing)
 
     options = ParametricDAQP.Settings(verbose=true)
     mpavi = StaticGNE2mpAVI(gnep, θub=θub, θlb=θlb)
-    return StaticGNEpDAQPSolver(gnep, mpavi, options, Ref(:Initialized))
+    return mpGNESolver(gnep, mpavi, options, Ref(:Initialized))
 
 end
 
-function CommonSolve.solve!(solver::StaticGNEpDAQPSolver)
+function CommonSolve.solve!(solver::mpGNESolver)
     mpAVI = solver.mpavi
 
     # Interface to call pDAQP

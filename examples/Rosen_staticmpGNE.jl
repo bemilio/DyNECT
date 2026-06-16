@@ -19,7 +19,7 @@ gnep = DyNECT.StaticGNEGame(Q, q, A_loc, b_loc, A_sh, b_sh)
 θlb = [-5.0]
 mpavi = StaticGNE2mpAVI(gnep, θub=θub, θlb=θlb)
 println("$mpavi")
-sol = CommonSolve.solve(gnep, DyNECT.StaticGNEpDAQPSolver, θub = θub, θlb = θlb)
+sol = CommonSolve.solve(gnep, DyNECT.mpGNESolver, θub = θub, θlb = θlb)
 
 for cr in sol.CRs
 println("$cr")
