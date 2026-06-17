@@ -55,7 +55,7 @@ println("Equilibrium PWA mapping found!\n")
 # ============================================================================
 # Step 3: Interpret the landscape
 # ============================================================================
-println("$(length(sol.CRs)) operating regions discovered:")
+println("$(length(sol.CRs)) filtered active regions discovered:")
 println("As demand varies, the equilibrium shifts between these regions.\n")
 
 for (i, region) in enumerate(sol.CRs[1:min(3, length(sol.CRs))])
@@ -79,5 +79,25 @@ This parametric solution means:
    Know equilibrium instantly for any demand
    Explore how system behaves across operating regimes
 """)
+
+println("─ Find Globally Optimal Equilibrium\n")
+
+# Define objective: minimize total resource usage
+φ(u) = sum(abs.(u))
+
+try
+    optimal = DyNECT.select_optimal_gne!(sol, φ)
+    
+    println("✓ Globally optimal GNE found:")
+    println("  θ* = $(round.(optimal.θ_star; digits=3))")
+    println("  u* = $(round.(optimal.u_star; digits=3))")
+    println("  φ* = $(round(optimal.φ_star; digits=6)) (objective value)")
+    println("  Region: $(optimal.region_id)")
+    println("  Searched $(length(optimal.all_candidates)) candidates\n")
+catch e
+    println("Optimal selection failed: $e")
+end
+
+println("Each region defines a different equilibrium law as θ varies.")
 
 println("\e[34m" * "Next: See examples/...jl for full application\n" * "\e[0m")
