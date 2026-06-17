@@ -766,7 +766,7 @@ if params.warmstart == :UnconstrainedSolution
         Q = [[Matrix(1.0I, 1, 1), zeros(1, 1)], [zeros(1, 1), Matrix(1.0I, 1, 1)]],
         q = [[0.0], [0.0]]
     )
-    # Warm-start with verbose=false to avoid confusing output
+    # Warm-start with verbose=false to run silently
     options_warmstart = ParametricDAQP.Settings(verbose=false)
     solver_warmstart = mpGNESolver(gnep_warmstart, StaticGNE2mpAVI(gnep_warmstart), options_warmstart, Ref(:Initialized))
     _ = CommonSolve.solve!(solver_warmstart)  # Silent warm-start
