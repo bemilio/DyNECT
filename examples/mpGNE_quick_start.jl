@@ -55,49 +55,22 @@ println("Equilibrium PWA mapping found!\n")
 # ============================================================================
 # Step 3: Interpret the landscape
 # ============================================================================
-println("$(length(sol.CRs)) filtered active regions discovered:")
-println("As demand varies, the equilibrium shifts between these regions.\n")
-
-for (i, region) in enumerate(sol.CRs[1:min(3, length(sol.CRs))])
-    offset = round.(region.z[:, 1], digits=3)
-    println("Region $i: u* = $offset")
+println("$(length(sol.CRs)) filtered active regions found\n")
+for (i, region) in enumerate(sol.CRs[1:min(2, length(sol.CRs))])
+    println("Region $i: u* = $(round.(region.z[:, 1]; digits=3))")
+end
+if length(sol.CRs) > 2
+    println("... $(length(sol.CRs) - 2) more regions")
 end
 
-println("""
-Each region defines a different equilibrium law as θ varies.
-Compute once, apply instantly across the entire parameter space.
-""")
-
-
-if length(sol.CRs) > 3
-    println("... and $(length(sol.CRs) - 3) more regions")
-end
-
-println("""
-This parametric solution means:
-   Compute once, use for all parameter values
-   Know equilibrium instantly for any demand
-   Explore how system behaves across operating regimes
-""")
-
-println("─ Find Globally Optimal Equilibrium\n")
-
-# Define objective: minimize total resource usage
+# Select globally optimal equilibrium
+println("\n\e[33m─ Optimal Equilibrium Selection\e[0m")
 φ(u) = sum(abs.(u))
+optimal = DyNECT.select_optimal_gne!(sol, φ)
 
-try
-    optimal = DyNECT.select_optimal_gne!(sol, φ)
-    
-    println("✓ Globally optimal GNE found:")
-    println("  θ* = $(round.(optimal.θ_star; digits=3))")
-    println("  u* = $(round.(optimal.u_star; digits=3))")
-    println("  φ* = $(round(optimal.φ_star; digits=6)) (objective value)")
-    println("  Region: $(optimal.region_id)")
-    println("  Searched $(length(optimal.all_candidates)) candidates\n")
-catch e
-    println("Optimal selection failed: $e")
-end
-
-println("Each region defines a different equilibrium law as θ varies.")
+println("θ* = $(round.(optimal.θ_star; digits=3))")
+println("u* = $(round.(optimal.u_star; digits=3))")
+println("φ* = $(round(optimal.φ_star; digits=6))")
+println("Region: $(optimal.region_id)\n")
 
 println("\e[34m" * "Next: See examples/...jl for full application\n" * "\e[0m")
