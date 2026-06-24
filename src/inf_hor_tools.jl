@@ -1,5 +1,19 @@
 @enum method STEIN = 1
 
+@doc raw"""
+    solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
+
+Solve the infinite-horizon **Open-Loop Nash Equilibrium** (OLNE) for a linear-quadratic game
+using a fixed-point iteration (STEIN method, [Freiling-Jank-Kandil '99]).
+
+Returns `(P, Ki)` where:
+- `P::Vector{Matrix}`: Value-function matrices for each agent.
+- `Ki::Vector{Matrix}`: Open-loop gain matrices ``K_i`` such that ``u_i = K_i x``.
+
+!!! note
+    Affine terms (`q`, `r`, `c`) and cross-input weights (off-diagonal `R[i][j]`) are ignored;
+    a warning is issued if they are non-zero.
+"""
 function solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
     if any(norm(qi) > 1e-5 for qi in game.q) ||
        any(norm(ri) > 1e-5 for ri in game.r) ||
@@ -40,9 +54,8 @@ function solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
             try
                 P[i] = (1 - stepsize) * P[i] + stepsize * sylvd(-game.A', A_cl, game.Q[i]) # Solves P[i] - A' * P[i] * A_cl = Q[i]
             catch e
-                disp("[solveInfHorOL] An error occurred while solving the Sylvester equation: " + e.message)
+                @warn "[solveOLNE] Sylvester equation failed: $e"
                 return nothing
-                break
             end
         end
         A_cl = (I(game.nx) + S * vcat(P...)) \ game.A # Closed loop matrix
@@ -54,7 +67,6 @@ function solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
             for i = 1:game.N
                 err = err + norm(game.Q[i] - P[i] + game.A' * P[i] * A_cl)
             end
-            # println("[solveOLNE] Error = $err; Iter = $k")
             if err < eps_err
                 if maximum(abs.(eigvals(A_cl))) > 1.0
                     @warn "[solveInfHorOL] The solution is found, but it is not stabilizing"
@@ -69,6 +81,15 @@ function solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
     return P, Ki
 end
 
+@doc raw"""
+    solveExtendedARE(game::DynLQGame, K::Vector{<:AbstractMatrix})
+
+Solve the **extended Algebraic Riccati Equations** for each agent given fixed gains `K`.
+
+Used internally by `solveCLNE` to evaluate the cost-to-go under the current policy.
+Returns `(P_ext, K_ext)` — extended value matrices and gain matrices in the 2nₓ-dimensional
+extended state space.
+"""
 function solveExtendedARE(game::DynLQGame, K::Vector{<:AbstractMatrix})
     nx = game.nx
     P_ext = [zeros(2 * nx, 2 * nx) for _ in 1:game.N]
@@ -87,6 +108,20 @@ function solveExtendedARE(game::DynLQGame, K::Vector{<:AbstractMatrix})
     return P_ext, K_ext
 end
 
+@doc raw"""
+    solveCLNE(game::DynLQGame; max_iter=1000, stepsize=0.1)
+
+Solve the infinite-horizon **Closed-Loop Nash Equilibrium** (CLNE) via a simultaneous
+Algebraic Riccati Equation (ARE) fixed-point iteration.
+
+Returns `(P, K)` where:
+- `P::Vector{Matrix}`: Value-function matrices for each agent.
+- `K::Vector{Matrix}`: Feedback gain matrices ``K_i`` such that ``u_i = K_i x``.
+
+!!! note
+    Affine terms (`q`, `r`, `c`) and cross-input weights (off-diagonal `R[i][j]`) are not
+    supported and will be ignored; a warning is issued if they are non-zero.
+"""
 function solveCLNE(game::DynLQGame; max_iter=1000, stepsize=0.1)
     if any(norm(qi) > 1e-5 for qi in game.q) ||
        any(norm(ri) > 1e-5 for ri in game.r) ||

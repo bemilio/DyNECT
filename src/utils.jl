@@ -161,8 +161,13 @@ function generate_prediction_model(A::Matrix{Float64}, Bi::Vector{<:AbstractMatr
 end
 
 
+"""
+    is_stabilizable(A, B) -> Bool
+
+Return `true` if the pair `(A, B)` is stabilizable, i.e. every unstable mode of `A`
+(eigenvalue with |λ| ≥ 1) is controllable. Uses the Hautus lemma.
+"""
 function is_stabilizable(A, B)
-    # Hautus lemma for stabilizability
     eigv_A = eigvals(A)
     n_x = size(A, 1)
     for λ in eigv_A
@@ -176,11 +181,15 @@ function is_stabilizable(A, B)
     return true
 end
 
+"""
+    is_detectable(A, C) -> Bool
+
+Return `true` if the pair `(A, C)` is detectable, i.e. every unstable mode of `A`
+(eigenvalue with |λ| ≥ 1) is observable. Uses the Hautus lemma.
+"""
 function is_detectable(A, C)
-    # Hautus lemma for stabilizability
     eigv_A = eigvals(A)
     n_x = size(A, 1)
-    is_stbl = true
     for λ in eigv_A
         if abs(λ) ≥ 1
             M = vcat(λ * I(n_x) - A, C)
@@ -192,29 +201,30 @@ function is_detectable(A, C)
     return true
 end
 
+"""
+    compute_residual(prob::AVI, x::AbstractVector) -> Float64
+
+Compute the natural residual of the AVI at point `x`: the distance from `x` to its
+projection onto the feasible set along the VI mapping direction.
+"""
 function compute_residual(prob::AVI, x::AbstractVector)
     y = x - (prob.H * x + prob.f)
-    #TODO: Switch to Clarabel
     proj = DAQP.Model()
     DAQP.setup(proj, Matrix{Float64}(I, prob.n, prob.n), -y, Matrix{Float64}(prob.A), prob.b, Float64[], zeros(Cint, prob.m))
     x_transf, _, _, _ = DAQP.solve(proj)
-    r = norm(x - x_transf)
-    # qp = Clarabel.Solver()
-    # eye = spdiagm(0 => ones(Float64, prob.n))
-    # settings = Clarabel.Settings(verbose=false)
-    # cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
-    # Clarabel.setup!(qp, eye, -y, prob.A, prob.b, cone, settings)
-    # results = solveQPRobust(qp)
-    # r = norm(x - results.x)
-    # if results.status != :Solved
-    #     @warn "[compute_residual] QP solver returned $(results.status)"
-    # end
-    return r
+    return norm(x - x_transf)
 end
 
-```
-Set the limits of the parameter space to an mpAVI
-```
+@doc raw"""
+    setParameterSpace(mpavi::mpAVI; C, d, ub, lb) -> mpAVI
+
+Return a new `mpAVI` with updated parameter-space bounds. Any argument left as `nothing`
+retains the value from `mpavi`.
+
+# Keyword Arguments
+- `C`, `d`: Polytope constraint matrix and right-hand side (`Cθ ≤ d`).
+- `ub`, `lb`: Upper and lower box bounds on the parameter `θ`.
+"""
 function setParameterSpace(mpavi::mpAVI;
     C::Union{AbstractMatrix{Float64},Nothing}=nothing,
     d::Union{AbstractVector{Float64},Nothing}=nothing,
