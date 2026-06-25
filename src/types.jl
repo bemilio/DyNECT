@@ -358,6 +358,42 @@ function AVI(mpAVI::mpAVI, θ::AbstractVector)
     return AVI(mpAVI.H, mpAVI.F * θ + mpAVI.f, mpAVI.A, mpAVI.B * θ + mpAVI.b)
 end
 
+struct OptimalGNEP
+    GNEP::StaticGNEGame
+    ϕ::Function
+    is_quadratic::Bool
+    function OptimalGNEP(
+        GNEP::StaticGNEGame,
+        Q::AbstractMatrix,
+        q::AbstractVector
+    )
+        n_tot = sum(GNEP.n)
+
+        @assert size(Q, 1) == n_tot && size(Q, 2) == n_tot "[OptimalGNEP constructor] Q must be square with size sum(n)"
+        @assert length(q) == n_tot "[OptimalGNEP constructor] q must have length sum(n)"
+
+        @assert issymmetric(Q) "[OptimalGNEP constructor] Q must be symmetric"
+        @assert isposdef(Q) "[OptimalGNEP constructor] Q must be positive definite"
+
+        ϕ = x -> 0.5 * x' * Q * x + x' * q
+
+        return new(GNEP, ϕ, true)
+    end
+    function OptimalGNEP(
+        GNEP::StaticGNEGame,
+        ϕ::Function
+    )   
+        # Check if ϕ is quadratic
+        dummy_model = Model()
+        @variable(dummy_model, y_test[1:sum(GNEP.n)])
+        result = ϕ(y_test)
+        size(result) == () || throw(ErrorException("[OptimalGNEP constructor] ϕ must return a scalar"))
+        is_quadratic = result isa Union{Number, AffExpr, QuadExpr}
+        
+        return new(GNEP, ϕ, is_quadratic)
+    end
+end
+
 mutable struct IterativeSolverParams
     max_iter::Int
     stepsize::Union{Float64,Nothing}

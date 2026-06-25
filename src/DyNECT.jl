@@ -16,9 +16,8 @@ include("interfaces.jl")
 
 using CommonSolve
 include("solvers.jl")
-export DynLQGame, DynLQGame2mpAVI
-export StaticGNEGame, StaticGNE2mpAVI, filter_gne_crs!, OptimalGNEResult, select_optimal_gne!, mpGNESolver #added v_static_mpGNE
-export AVI, IterativeSolverParams
+export DynLQGame, DynLQGame2mpAVI, AVI
+export StaticGNEP, OptimalGNEP
 export solve
 
 end

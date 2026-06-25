@@ -169,7 +169,7 @@ end
 #added v_static_mpGNE
 
 @testset "StaticGNEGame" begin
-    # Scalar Rosen example using new mpGNESolver
+    # Scalar Rosen example using Nabetani reformulation + mpAVI solver
     gnep = DyNECT.StaticGNEGame(
         Q = [[[1.;;], [-1.;;]], 
              [[1.;;], [2.;;]]],
@@ -182,16 +182,18 @@ end
     
     θub = [5.0]
     θlb = [-5.0]
-    sol = CommonSolve.solve(gnep, DyNECT.mpGNESolver; θub = θub, θlb = θlb, params=DyNECT.IterativeSolverParams(warmstart=:UnconstrainedSolution))
+    sol = CommonSolve.solve(gnep, DyNECT.NabetaniParametrizationSolver; θub = θub, θlb = θlb)
 
     
     # Test solution: x1 = 1 - x2, -1 < x2 < 0.5
     tol = 1e-6
+    all_solutions_found = true
     for θ in θlb[1]:0.1:θub[1]
         x = DyNECT.evaluatePWA(sol, [θ])
         if !isnothing(x)
-            @test norm(x[1] - (1 - x[2])) < tol
-            @test -1.0 <= x[2] <= 0.5
+            all_solutions_found = all_solutions_found & (norm(x[1] - (1 - x[2])) < tol)
+            all_solutions_found = all_solutions_found & (@test -1.0 <= x[2] <= 0.5)
         end
     end
+    @test all_tests_within_tol
 end

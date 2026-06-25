@@ -717,7 +717,6 @@ end
 function CommonSolve.solve!(pDAQP::ParametricDAQPSolver)
     mpAVI = pDAQP.mpAVI
 
-    # Pass raw named tuple directly to mpsolve — it calls setup_mpp internally
     raw = (
         H = mpAVI.H,
         F = mpAVI.F,
@@ -739,45 +738,24 @@ function CommonSolve.solve!(pDAQP::ParametricDAQPSolver)
 end
 
 
-### GNEP solvers
+### Static GNEP solvers
 
-struct mpGNESolver
+struct NabetaniParametrizationSolver
     gnep::StaticGNEGame
     mpavi::mpAVI
     options::ParametricDAQP.Settings
     status::Ref{Symbol}
 end
 
-function CommonSolve.init(gnep::StaticGNEGame, ::Type{mpGNESolver}; 
-    θub=nothing, 
-    θlb=nothing,
-    params::IterativeSolverParams=IterativeSolverParams())
+function CommonSolve.init(gnep::StaticGNEGame, ::Type{NabetaniParametrizationSolver}; θub=nothing, θlb=nothing) 
     
     options = ParametricDAQP.Settings(verbose=true)
-    mpavi = StaticGNE2mpAVI(gnep, θub=θub, θlb=θlb)
-    
-    # Warm-start: defrost numerically if requested
-if params.warmstart == :UnconstrainedSolution
-    gnep_warmstart = StaticGNEGame(
-        A_loc = [[-1.0;;], [-1.0;;]],
-        b_loc = [[1.0], [1.0]],
-        A_sh = [[1.0;;], [1.0;;]],
-        b_sh = [100.0],
-        Q = [[Matrix(1.0I, 1, 1), zeros(1, 1)], [zeros(1, 1), Matrix(1.0I, 1, 1)]],
-        q = [[0.0], [0.0]]
-    )
-    # Warm-start with verbose=false to run silently
-    options_warmstart = ParametricDAQP.Settings(verbose=false)
-    solver_warmstart = mpGNESolver(gnep_warmstart, StaticGNE2mpAVI(gnep_warmstart), options_warmstart, Ref(:Initialized))
-    _ = CommonSolve.solve!(solver_warmstart)  # Silent warm-start
-elseif params.warmstart != :NoWarmStart
-    @warn "[mpGNESolver] Requested warmstart $(params.warmstart) not implemented. Using no warm-start."
-end
-    
-    return mpGNESolver(gnep, mpavi, options, Ref(:Initialized))
+    mpavi = NabetaniParametrization(gnep, θub=θub, θlb=θlb)
+
+    return NabetaniParametrizationSolver(gnep, mpavi, options, Ref(:Initialized))
 end
 
-function CommonSolve.solve!(solver::mpGNESolver)
+function CommonSolve.solve!(solver::NabetaniParametrizationSolver)
     mpAVI = solver.mpavi
 
     # Interface to call pDAQP
@@ -799,6 +777,29 @@ function CommonSolve.solve!(solver::mpGNESolver)
     
     # Remove critical regions not associated to Nash equilibria
     filter_gne_crs!(sol, solver.gnep)
-
+    solver.status[] = :Solved
     return sol
+end
+
+
+### Optimal GNEP solvers
+
+struct PWAConvexOptSolver
+    optGNEP::OptimalGNEP
+    status::Ref{Symbol}
+end
+
+function CommonSolve.init(optGNEP::OptimalGNEP, ::Type{PWAConvexOptSolver}) 
+    return PWAConvexOptSolver(optGNEP, Ref(:Initialized))
+end
+
+function CommonSolve.solve!(solver::PWAConvexOptSolver)
+    GNEP = solver.optGNEP.GNEP
+    GNEPsol = solve(GNEP, NabetaniParametrizationSolver)
+    sol = select_optimal_gne(
+        GNEPsol,
+        solver.optGNEP.ϕ,
+        solver.optGNEP.is_quadratic)
+    solver.status[] = :Solved
+    return (x=sol.x, ϕ=sol.ϕ)
 end

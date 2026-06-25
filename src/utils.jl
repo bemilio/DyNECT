@@ -1,3 +1,5 @@
+####### Type conversion functions #####
+
 @doc raw"""
     DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
     Constructs the parametric variational inequality (mpVI) for a dynamic Nash equilibrium problem (DynLQGame) over a finite prediction horizon.
@@ -77,7 +79,6 @@ function DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
     return mpAVI(Matrix{Float64}(H), F, f, D, E, d)
 end
 
-#added v_static_mpGNE
 @doc raw"""
     StaticGNE2mpAVI(game::StaticGNEGame)
  
@@ -89,7 +90,7 @@ The Nabetani-Tseng-Fukushima reparametrization transforms shared constraints int
  
 Returns: ``\text{VI}(H x + f, A x \leq B \theta + b)`` where ``\theta \in [\text{lb}, \text{ub}]``
 """
-function StaticGNE2mpAVI(game::StaticGNEGame; θub::Union{Vector{Float64},Nothing}=nothing, θlb::Union{Vector{Float64},Nothing}=nothing)
+function NabetaniParametrization(game::StaticGNEGame; θub::Union{Vector{Float64},Nothing}=nothing, θlb::Union{Vector{Float64},Nothing}=nothing)
     # Infer dimensions
     N = game.N
     n = game.n
@@ -150,6 +151,106 @@ function StaticGNE2mpAVI(game::StaticGNEGame; θub::Union{Vector{Float64},Nothin
     # Return mpAVI
     return mpAVI(H, zeros(n_total, n_theta), f, A, B, b, ub=θub, lb=θlb)
 end
+####### END Type conversion functions #######
+
+####### Helper functions for optimal GNE selection ##########
+function filter_gne_crs!(sol::ParametricDAQP.Solution, game::StaticGNEGame)
+    N = game.N
+    m_sh = length(game.b_sh)
+    n_local = sum(size(game.A_loc[i], 1) for i in 1:N)
+    shared_start = n_local + 1
+    
+    filter!(sol.CRs) do cr
+        for i in 1:m_sh
+            # Collect all rows of the reformulated constraints associated to the same shared constraints
+            player_row_indices = [shared_start + (p - 1) * m_sh + (i - 1) for p in 1:N]
+            # Check if they are all active / inactive
+            active_status = [row_idx ∈ cr.AS for row_idx in player_row_indices]
+            all_active = all(active_status)
+            none_active = !any(active_status)
+            # If they are neither all active or inactive, the region does not correspond to a set of GNEs
+            if !(all_active || none_active)
+                return false
+            end
+        end
+        return true
+    end
+    return length(sol.CRs)
+end
+
+function select_optimal_gne(
+    sol::ParametricDAQP.Solution,
+    ϕ::Function,
+    is_quadratic::Bool,
+    optimizer = Solver.Clarabel
+)::OptimalGNEResult
+    if !is_quadratic &&  optimizer == Solver.Clarabel
+        @warn "[select_optimal_gne!] Non-quadratic problem with Clarabel not supported. Switching to IPOPT."
+        optimizer = Solver.IPOPT
+    end
+    candidates = []
+    
+    for k in 1:length(sol.CRs)
+        CR_k = sol.CRs[k]
+        
+        # Extract region geometry
+        # Ath has shape n_θ × m_k; constraint is Ath'θ ≤ bth (see find_CR)
+        A_k = CR_k.Ath'  # m_k × n_θ
+        b_k = CR_k.bth
+        n_θ = size(A_k, 2)
+        
+        # Extract affine map: u = M_k θ + d_k from CR.z' * [θ; 1]
+        # CR.z is (n_θ+1) × n_u, so:
+        M_k = CR_k.z[1:end-1, :]'  # n_u × n_θ
+        d_k = vec(CR_k.z[end, :])   # n_u
+        n_u = size(M_k, 1)
+
+        # Construct optimization problem
+        if is_quadratic
+            # Quadratic problem: objective built by straightforward composition
+            model = Model(optimizer)
+            set_silent(model)
+            @variable(model, θ[1:n_θ])
+            @objective(model, Min, ϕ(M_k * θ .+ d_k))
+            @constraint(model, A_k * θ .<= b_k)
+        else
+            # Otherwise: add linear equality constraint
+            model = Model(optimizer)
+            set_silent(model)
+            @variable(model, θ[1:n_θ])
+            @variable(model, y[1:n_u])
+            @constraint(model, y .== M_k * θ .+ d_k)
+            @constraint(model, A_k * θ .<= b_k)
+            @operator(model, op_ϕ, m, (ys...) -> ϕ(collect(ys)))
+            @objective(model, Min, op_ϕ(y...))
+        end
+        
+        optimize!(model)
+        # Extract results only when optimal
+        if termination_status(model) == OPTIMAL
+            θ_opt = value.(θ)
+            obj_opt = objective_value(model)
+            push!(candidates, (θ=θ_opt, u=M_k * θ_opt + d_k, φ=obj_opt, region=k))
+        else
+            @warn "[select_optimal_gne!] Region $k skipped: termination status $(termination_status(model))"
+        end
+    end
+    
+    if isempty(candidates)
+        error("[select_optimal_gne!] No regions solved successfully.")
+    end
+    
+    # Global selection: pick best φ
+    φ_values = [c.φ for c in candidates]
+    k_best = argmin(φ_values)
+    best = candidates[k_best]
+    
+    return OptimalGNEResult(best.θ, best.u, best.φ, best.region, candidates)
+end
+
+####### END Helper functions for optimal GNE selection ##########
+
+####### Dynamics functions #######
 
 @doc raw"""
     generate_prediction_model(A, Bi, T_hor)
@@ -265,6 +366,8 @@ function is_detectable(A, C)
     end
     return true
 end
+
+####### END Dynamics functions #######
 
 function compute_residual(prob::AVI, x::AbstractVector)
     y = x - (prob.H * x + prob.f)
