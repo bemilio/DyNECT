@@ -387,7 +387,7 @@ struct OptimalGNEP
         dummy_model = Model()
         @variable(dummy_model, y_test[1:sum(GNEP.n)])
         result = ϕ(y_test)
-        size(result) == () || throw(ErrorException("[OptimalGNEP constructor] ϕ must return a scalar"))
+        result isa Union{Number,AffExpr,QuadExpr} || throw(ErrorException("[OptimalGNEP constructor] ϕ must return a scalar"))
         is_quadratic = result isa Union{Number, AffExpr, QuadExpr}
         
         return new(GNEP, ϕ, is_quadratic)

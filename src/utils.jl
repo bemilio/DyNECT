@@ -133,7 +133,7 @@ function NabetaniParametrization(game::StaticGNEGame; θub::Union{Vector{Float64
     # Top block: I_{(N-1)*m_sh}    (agents 1,...,N-1 get explicit allocation θ)
     # Bottom block: -ones(m_sh, (N-1)*m_sh)  (agent N gets remainder)
     B_g_top = I((N - 1) * m_sh)
-    B_g_bottom = -ones(m_sh, (N - 1) * m_sh)
+    B_g_bottom = kron(-1 .* ones(1, N-1), Matrix(I, m_sh, m_sh))
     B_g = vcat(B_g_top, B_g_bottom)
     
     # d_g = [zeros((N-1)*m_sh); b_sh]
@@ -182,11 +182,11 @@ function select_optimal_gne(
     sol::ParametricDAQP.Solution,
     ϕ::Function,
     is_quadratic::Bool,
-    optimizer = Solver.Clarabel
+    optimizer = Clarabel.Optimizer
 )::OptimalGNEResult
-    if !is_quadratic &&  optimizer == Solver.Clarabel
+    if !is_quadratic && optimizer == Clarabel.Optimizer
         @warn "[select_optimal_gne!] Non-quadratic problem with Clarabel not supported. Switching to IPOPT."
-        optimizer = Solver.IPOPT
+        optimizer = Ipopt.Optimizer
     end
     candidates = []
     

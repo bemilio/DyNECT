@@ -4,7 +4,7 @@ module DyNECT
 using LinearAlgebra, SparseArrays, MatrixEquations, BlockDiagonals, BlockArrays, CommonSolve
 
 # External solvers
-using DAQP, Clarabel, JuMP, Monviso, ParametricDAQP
+using DAQP, Clarabel, Ipopt, JuMP, Monviso, ParametricDAQP
 
 
 # CommonSolve

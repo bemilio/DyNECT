@@ -795,11 +795,11 @@ end
 
 function CommonSolve.solve!(solver::PWAConvexOptSolver)
     GNEP = solver.optGNEP.GNEP
-    GNEPsol = solve(GNEP, NabetaniParametrizationSolver)
+    GNEPsol = CommonSolve.solve(GNEP, NabetaniParametrizationSolver)
     sol = select_optimal_gne(
         GNEPsol,
         solver.optGNEP.ϕ,
         solver.optGNEP.is_quadratic)
     solver.status[] = :Solved
-    return (x=sol.x, ϕ=sol.ϕ)
+    return (x=sol.u_star, ϕ=sol.φ_star)
 end
