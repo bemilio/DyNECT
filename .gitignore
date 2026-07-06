@@ -14,3 +14,7 @@ pv_imp_results.csv
 /.CondaPkg
 static_mpGNE/output/*.png
 static_mpGNE/output/*.pdf
+.claude/settings.json
+examples/Manifest.toml
+Manifest.toml
+*.png
