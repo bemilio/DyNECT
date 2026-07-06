@@ -202,7 +202,69 @@ struct DynLQGame # Dynamic Nash equilibrium problem
     end
 end
 
+#added v_static_mpGNE
+struct StaticGNEGame #
+    N::Int
+    n::Vector{Int}
+    Q::Vector{Vector{Matrix{Float64}}}
+    q::Vector{Vector{Float64}}
+    A_loc::Vector{Matrix{Float64}}
+    b_loc::Vector{Vector{Float64}}
+    A_sh::Vector{Matrix{Float64}}
+    b_sh::Vector{Float64}
+ 
+    function StaticGNEGame(
+        Q::Vector{Vector{Matrix{Float64}}},
+        q::AbstractVector,
+        A_loc::AbstractVector,
+        b_loc::AbstractVector,
+        A_sh::AbstractVector,
+        b_sh::AbstractVector{<:Real}
+    )
+        # Infer number of agents
+        N = length(Q)
+        # Infer size of decision variables
+        n = [size(Q[i][i], 1) for i in 1:N]
+        @assert N >= 2 "N must be at least 2 (Nash equilibrium requires multiple players)"
+        @assert all(n .> 0) "All player dimensions n[i] must be positive"
+        @assert all(length(Qi) == N for Qi in Q) "Each element of Q must have length $(N) (one matrix per agent)"
+        for i in 1:N
+            for j in 1:N
+                @assert size(Q[i][j], 1) == n[i] "Q[$i][$j] must have n[$i]=$(n[i]) rows, got $(size(Q[i][j], 1))"
+                @assert size(Q[i][j], 2) == n[j] "Q[$i][$j] must have n[$j]=$(n[j]) columns, got $(size(Q[i][j], 2))"
+            end
+        end
+        
+        @assert length(q) == N "q must have length N (one vector per player), got $(length(q))"
+        for i in 1:N
+            @assert length(q[i]) == n[i] "q[$i] must have length n[$i]=$(n[i]), got $(length(q[i]))"
+        end
+        
+        @assert length(A_loc) == N "A_loc must have length N (one matrix per agent)"
+        @assert length(b_loc) == N "b_loc must have length N (one matrix per agent)"
+        for i in 1:N
+            @assert size(A_loc[i], 2) == n[i] "A_loc[$i] must have $(n[i]) columns, got $(size(A_loc[i], 2))"
+            @assert size(A_loc[i], 1) == length(b_loc[i]) "A_loc[$i] has $(size(A_loc[i], 1)) rows but b_loc[$i] has length $(length(b_loc[i]))"
+        end
+        
+        @assert length(A_sh) == N "A_sh must have length N (one block per player)"
+        m_sh = size(A_sh[1], 1)
+        for i in 1:N
+            @assert size(A_sh[i], 1) == m_sh "All A_sh[i] must have m_sh=$m_sh rows. A_sh[$i] has $(size(A_sh[i], 1))"
+            @assert size(A_sh[i], 2) == n[i] "A_sh[$i] must have n[$i]=$(n[i]) columns, got $(size(A_sh[i], 2))"
+        end
+        
+        @assert length(b_sh) == m_sh "b_sh must have m_sh=$m_sh elements, got $(length(b_sh))"
 
+        return new(N, n, Q, q, A_loc, b_loc, A_sh, b_sh) 
+    end 
+
+    function StaticGNEGame(; Q, q, A_loc, b_loc, A_sh, b_sh) 
+        StaticGNEGame(Q, q, A_loc, b_loc, A_sh, b_sh) 
+    end 
+end #
+ 
+struct mpAVI #src usage
 @doc raw"""
     mpAVI
 
@@ -226,7 +288,6 @@ with parameter set ``\theta \in \{C\theta \leq d\} \cap \{lb \leq \theta \leq ub
 - `m`: Number of constraints.
 - `n_θ`: Number of parameters.
 """
-struct mpAVI
     # VI(Hx + Fθ + f, Ax ≤ Bθ + b)
     # With θ ∈ { Cθ ≤ d } ∩ { lb ≤ θ ≤ ub }
     H::AbstractMatrix # size = n_x * n_x
@@ -283,7 +344,7 @@ struct mpAVI
 
         return new(H, F, f, A, B, b, C, d, ub, lb, n, m, n_θ)
     end
-end
+end #
 
 
 
@@ -339,6 +400,42 @@ function AVI(mpAVI::mpAVI, θ::AbstractVector)
     return AVI(mpAVI.H, mpAVI.F * θ + mpAVI.f, mpAVI.A, mpAVI.B * θ + mpAVI.b)
 end
 
+struct OptimalGNEP
+    GNEP::StaticGNEGame
+    ϕ::Function
+    is_quadratic::Bool
+    function OptimalGNEP(
+        GNEP::StaticGNEGame,
+        Q::AbstractMatrix,
+        q::AbstractVector
+    )
+        n_tot = sum(GNEP.n)
+
+        @assert size(Q, 1) == n_tot && size(Q, 2) == n_tot "[OptimalGNEP constructor] Q must be square with size sum(n)"
+        @assert length(q) == n_tot "[OptimalGNEP constructor] q must have length sum(n)"
+
+        @assert issymmetric(Q) "[OptimalGNEP constructor] Q must be symmetric"
+        @assert isposdef(Q) "[OptimalGNEP constructor] Q must be positive definite"
+
+        ϕ = x -> 0.5 * x' * Q * x + x' * q
+
+        return new(GNEP, ϕ, true)
+    end
+    function OptimalGNEP(
+        GNEP::StaticGNEGame,
+        ϕ::Function
+    )   
+        # Check if ϕ is quadratic
+        dummy_model = Model()
+        @variable(dummy_model, y_test[1:sum(GNEP.n)])
+        result = ϕ(y_test)
+        result isa Union{Number,AffExpr,QuadExpr} || throw(ErrorException("[OptimalGNEP constructor] ϕ must return a scalar"))
+        is_quadratic = result isa Union{Number, AffExpr, QuadExpr}
+        
+        return new(GNEP, ϕ, is_quadratic)
+    end
+end
+
 @doc raw"""
     IterativeSolverParams
 
@@ -368,4 +465,22 @@ function IterativeSolverParams(; max_iter::Int=10000,
     verbose::Bool=false,
     time_limit::Float64=1e2)
     return IterativeSolverParams(max_iter, stepsize, tol, warmstart, verbose, time_limit)
+end
+
+#added optimal GNE selection #usage
+struct OptimalGNEResult
+    θ_star::Vector{Float64} #Optimal parameter value
+    u_star::Vector{Float64} #Optimal equilibrium (GNE)  
+    φ_star::Float64         #Performance metric value
+    region_id::Int          #Which critical region contained optimum
+    all_candidates::Vector  #All regional candidates for analysis
+end
+
+function Base.show(io::IO, result::OptimalGNEResult)
+    println(io, "OptimalGNEResult")
+    println(io, "  θ*: $(round.(result.θ_star; digits=6))")
+    println(io, "  u*: $(round.(result.u_star; digits=6))")
+    println(io, "  φ*: $(round(result.φ_star; digits=8))")
+    println(io, "  region: $(result.region_id)")
+    println(io, "  candidates: $(length(result.all_candidates))")
 end

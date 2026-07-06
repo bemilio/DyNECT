@@ -678,4 +678,68 @@ function CommonSolve.solve!(pDAQP::ParametricDAQPSolver)
 end
 
 
+### Static GNEP solvers
 
+struct NabetaniParametrizationSolver
+    gnep::StaticGNEGame
+    mpavi::mpAVI
+    options::ParametricDAQP.Settings
+    status::Ref{Symbol}
+end
+
+function CommonSolve.init(gnep::StaticGNEGame, ::Type{NabetaniParametrizationSolver}; θub=nothing, θlb=nothing) 
+    
+    options = ParametricDAQP.Settings(verbose=true)
+    mpavi = NabetaniParametrization(gnep, θub=θub, θlb=θlb)
+
+    return NabetaniParametrizationSolver(gnep, mpavi, options, Ref(:Initialized))
+end
+
+function CommonSolve.solve!(solver::NabetaniParametrizationSolver)
+    mpAVI = solver.mpavi
+
+    # Interface to call pDAQP
+    raw = (
+        H = mpAVI.H,
+        F = mpAVI.F,
+        f = mpAVI.f,
+        A = mpAVI.A,
+        B = mpAVI.B,
+        b = mpAVI.b,
+    )
+
+    Θ = (A  = mpAVI.C',
+         b  = mpAVI.d,
+         ub = mpAVI.ub,
+         lb = mpAVI.lb)
+
+    (sol, info) = ParametricDAQP.mpsolve(raw, Θ; opts = solver.options)
+    
+    # Remove critical regions not associated to Nash equilibria
+    filter_gne_crs!(sol, solver.gnep)
+    solver.status[] = :Solved
+    return sol
+end
+
+
+### Optimal GNEP solvers
+
+struct PWAConvexOptSolver
+    optGNEP::OptimalGNEP
+    status::Ref{Symbol}
+end
+
+function CommonSolve.init(optGNEP::OptimalGNEP, ::Type{PWAConvexOptSolver}) 
+    return PWAConvexOptSolver(optGNEP, Ref(:Initialized))
+end
+
+function CommonSolve.solve!(solver::PWAConvexOptSolver)
+    GNEP = solver.optGNEP.GNEP
+    GNEPsol = CommonSolve.solve(GNEP, NabetaniParametrizationSolver)
+    sol = select_optimal_gne(
+        GNEPsol,
+        solver.optGNEP.ϕ,
+        solver.optGNEP.is_quadratic)
+    solver.status[] = :Solved
+    return (x=sol.u_star, ϕ=sol.φ_star)
+end
