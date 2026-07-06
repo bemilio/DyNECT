@@ -1,5 +1,6 @@
 
-.vscode/launch.json
+.vscode/
+.claude/
 /docs/build
 pv_imp_results.csv
 *.csv

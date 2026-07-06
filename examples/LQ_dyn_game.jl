@@ -1,4 +1,3 @@
-using CommonSolve
 using DyNECT
 using BlockDiagonals
 using LinearAlgebra
@@ -52,7 +51,7 @@ mpvi = DynLQGame2mpAVI(game, T_hor)
 nx = size(A, 1)
 mpvi.ub[:] = 5. * ones(nx)
 mpvi.lb[:] = -5. * ones(nx)
-mpvi_sol = CommonSolve.solve(mpvi, DyNECT.ParametricDAQPSolver)
+mpvi_sol = solve(mpvi, DyNECT.ParametricDAQPSolver)
 
 # Define initial state
 x0 = 2 .* randn(game.nx)
@@ -70,14 +69,14 @@ params = DyNECT.IterativeSolverParams(verbose=true, time_limit=10.0)
 
 # Solve the AVI via iterative solvers
 
-DR_sol = CommonSolve.solve(avi, DyNECT.DouglasRachford; params=params)
+DR_sol = solve(avi, DyNECT.DouglasRachford; params=params)
 println("Solution residual DR = $(DR_sol.residual)")
 
-ADMM_sol = CommonSolve.solve(game, DyNECT.ADMMCLQGSolver; x0=x0, T_hor=T_hor, params=params)
+ADMM_sol = solve(game, DyNECT.ADMMCLQGSolver; x0=x0, T_hor=T_hor, params=params)
 println("Solution residual ADMM = $(ADMM_sol.residual)")
 
-DGSQP_sol = CommonSolve.solve(avi, DyNECT.DGSQPSolver; params=params)
+DGSQP_sol = solve(avi, DyNECT.DGSQPSolver; params=params)
 println("Solution residual DGSQP = $(DGSQP_sol.residual)")
 
-monviso_sol = CommonSolve.solve(avi, DyNECT.MonvisoSolver; method=:pg, params=params)
+monviso_sol = solve(avi, DyNECT.MonvisoSolver; method=:pg, params=params)
 println("Solution residual monviso = $(monviso_sol.residual)")

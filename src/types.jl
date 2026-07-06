@@ -265,6 +265,29 @@ struct StaticGNEGame #
 end #
  
 struct mpAVI #src usage
+@doc raw"""
+    mpAVI
+
+Multi-parametric Affine Variational Inequality of the form
+```math
+\mathrm{VI}(Hx + F\theta + f,\ Ax \leq B\theta + b)
+```
+with parameter set ``\theta \in \{C\theta \leq d\} \cap \{lb \leq \theta \leq ub\}``.
+
+# Fields
+- `H`: Mapping matrix, size `n × n`.
+- `F`: Parameter-to-mapping matrix, size `n × n_θ`.
+- `f`: Constant affine term, length `n`.
+- `A`: Constraint matrix, size `m × n`.
+- `B`: Parameter-to-constraint matrix, size `m × n_θ`.
+- `b`: Constraint right-hand side, length `m`.
+- `C`: Parameter polytope constraint matrix.
+- `d`: Parameter polytope right-hand side.
+- `ub`, `lb`: Box bounds on the parameter `θ`, length `n_θ`. Defaults to ±100.
+- `n`: Number of decision variables.
+- `m`: Number of constraints.
+- `n_θ`: Number of parameters.
+"""
     # VI(Hx + Fθ + f, Ax ≤ Bθ + b)
     # With θ ∈ { Cθ ≤ d } ∩ { lb ≤ θ ≤ ub }
     H::AbstractMatrix # size = n_x * n_x
@@ -325,6 +348,25 @@ end #
 
 
 
+@doc raw"""
+    AVI
+
+Affine Variational Inequality of the form
+```math
+\mathrm{VI}(Hx + f,\ Ax \leq b)
+```
+Find ``x`` such that ``\langle Hx + f,\, y - x \rangle \geq 0`` for all feasible ``y``.
+
+# Fields
+- `H`: Mapping matrix, size `n × n`.
+- `f`: Affine term, length `n`.
+- `A`: Constraint matrix, size `m × n`.
+- `b`: Constraint right-hand side, length `m`.
+- `n`: Number of decision variables.
+- `m`: Number of constraints.
+
+Can be constructed directly or from an `mpAVI` at a given parameter value via `AVI(mpAVI, θ)`.
+"""
 struct AVI
     # VI(Hx + f, Ax <= b)
     # where f, b are the last rows of F,B, respect.
@@ -394,6 +436,19 @@ struct OptimalGNEP
     end
 end
 
+@doc raw"""
+    IterativeSolverParams
+
+Configuration for iterative AVI/VI solvers.
+
+# Fields
+- `max_iter`: Maximum number of iterations (default: `10000`).
+- `stepsize`: Step size; `nothing` lets each solver pick its own default.
+- `tol`: Convergence tolerance on the VI residual (default: `1e-6`).
+- `warmstart`: Warm-start strategy — `:NoWarmStart` (zeros) or `:UnconstrainedSolution`.
+- `verbose`: Print progress every 1000 iterations when `true` (default: `false`).
+- `time_limit`: Wall-clock time limit in seconds (default: `100.0`).
+"""
 mutable struct IterativeSolverParams
     max_iter::Int
     stepsize::Union{Float64,Nothing}
