@@ -65,22 +65,28 @@ regulator for constrained multi-agent systems_ E. Benenati, G. Belgioioso, 2025]
 
 ## Installation
 
-DyNECT depends on 'ParametricDAQP.jl', which is not in the general registry. From the Julia REPL:
+DyNECT depends on 'ParametricDAQP.jl' and 'Monviso.jl', which are not in the general registry. From the Julia REPL:
 
 ```sh
+] add https://github.com/nicomignoni/Monviso.jl.git#vi-based
 ] add https://github.com/darnstrom/ParametricDAQP.jl
 ] add https://github.com/bemilio/DyNECT.git
 ```
 
 ## Examples
 
-The example in `examples/solve_LQGame_as_VI.jl`:
-- Implements a basic LQ game
-- Converts it into a multi-parametric VI
-- Finds explicitely the explicit solution mapping for all initial states
-- Given an initial state, converts the multi-parametric VI into a VI
-- Solves the VI via several iterative algorithms
+Example scripts are in `examples/` and use their own Julia environment. Run them with:
 
-Additional examples can be found at [this link](https://github.com/bemilio/scripts_for_explicit_LQGames_paper). 
+```sh
+julia --project=examples/ examples/LQ_dyn_game.jl
+```
+
+To install example dependencies once:
+
+```sh
+julia --project=examples/ -e 'using Pkg; Pkg.instantiate()'
+```
+
+Additional examples can be found at [this link](https://github.com/bemilio/scripts_for_explicit_LQGames_paper).
 
 

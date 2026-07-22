@@ -1,9 +1,11 @@
+####### Type conversion functions #####
+
 @doc raw"""
-    DynLQGame2mpAVI(prob::DynLQGameTI, T_hor::Int64)
-    Constructs the parametric variational inequality (mpVI) for a dynamic Nash equilibrium problem (DynLQGameTI) over a finite prediction horizon.
+    DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
+    Constructs the parametric variational inequality (mpVI) for a dynamic Nash equilibrium problem (DynLQGame) over a finite prediction horizon.
 
 # Arguments
-- `prob::DynLQGameTI`: Dynamic game structure containing system dynamics, cost, and constraints.
+- `prob::DynLQGame`: Dynamic game structure containing system dynamics, cost, and constraints.
 - `T_hor::Int64`: Prediction horizon.
 
 # Returns
@@ -19,7 +21,7 @@ The VI is of the form:
 ``H u + F x_0 + f``,  subject to  ``D u \leq E x_0 + d``
 where ``u`` is the stacked input sequence for all agents.
 """
-function DynLQGame2mpAVI(prob::DynLQGameTI, T_hor::Int64)
+function DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
     # Matrices defined as in Baghdalhorani, Benenati, Grammatico - Arxiv 2025
 
     # prediction model: x̅ = Θx₀+(∑ Γᵢu̅ᵢ) + c̅
@@ -139,7 +141,180 @@ function DynLQGame2mpAVI(prob::DynLQGameTV) # time varying
 end
 
 @doc raw"""
-    generate_prediction_model(A, B, T_hor)
+    StaticGNE2mpAVI(game::StaticGNEP)
+ 
+Assemble static GNE game into multi-parametric variational inequality (mpAVI).
+ 
+The Nabetani-Tseng-Fukushima reparametrization transforms shared constraints into parameter-dependent bounds:
+- Agent 1: ``A_{\text{sh},1} x_1 \leq \theta_1``
+- Agent i (i>1): ``A_{\text{sh},i} x_i \leq -\theta_{i-1} + b_{\text{sh}}``
+ 
+Returns: ``\text{VI}(H x + f, A x \leq B \theta + b)`` where ``\theta \in [\text{lb}, \text{ub}]``
+"""
+function NabetaniParametrization(game::StaticGNEP; θub::Union{Vector{Float64},Nothing}=nothing, θlb::Union{Vector{Float64},Nothing}=nothing)
+    # Infer dimensions
+    N = game.N
+    n = game.n
+    n_total = sum(n)
+    m_sh = length(game.b_sh)
+    n_theta = (N - 1) * m_sh
+
+    # Check size of bounds
+    if !isnothing(θub) 
+        @assert length(θub)==(game.N-1) * m_sh "# of par. upper bounds is $((game.N-1) * m_sh), got $(length(θub))"
+    end
+    if !isnothing(θlb)
+        @assert length(θlb)==(game.N-1) * m_sh "# of par. low bounds is $((game.N-1) * m_sh), got $(length(θlb)) "
+    end
+    
+    # Assemble Hessian (H) from Q blocks 
+    H = BlockArray{Float64}(undef_blocks, n, n)
+    for i in 1:N
+        for j in 1:N
+            H[Block(i, j)] = game.Q[i][j]
+        end
+    end
+    H = Matrix(H)
+    
+    # Assemble linear cost (f) from q vectors
+    f = vcat(game.q...)
+    
+    # Assemble local constraints
+    A_loc = BlockDiagonal(game.A_loc)
+    b_loc = vcat(game.b_loc...)
+
+    # Assemble Nabetani reparametrization
+    # A_hat = blkdiag(A_sh[1], A_sh[2], ..., A_sh[N])
+    A_hat_blocks = [game.A_sh[i] for i in 1:N]
+    A_hat = BlockDiagonal(A_hat_blocks)
+    A_hat = Matrix(A_hat)
+    
+    # B_g structure (correct for N ≥ 2):
+    # Shape: (N*m_sh) × ((N-1)*m_sh)
+    # Top block: I_{(N-1)*m_sh}    (agents 1,...,N-1 get explicit allocation θ)
+    # Bottom block: -ones(m_sh, (N-1)*m_sh)  (agent N gets remainder)
+    B_g_top = I((N - 1) * m_sh)
+    B_g_bottom = kron(-1 .* ones(1, N-1), Matrix(I, m_sh, m_sh))
+    B_g = vcat(B_g_top, B_g_bottom)
+    
+    # d_g = [zeros((N-1)*m_sh); b_sh]
+    d_g = vcat(zeros((N - 1) * m_sh), game.b_sh)
+    
+    # Stack all constraints 
+    A = vcat(A_loc, A_hat)
+    
+    # B matrix: local constraints have no theta dependence (zeros), shared constraints have B_g
+    B_loc = zeros(size(A_loc, 1), n_theta)
+    B = vcat(B_loc, B_g)
+    
+    b = vcat(b_loc, d_g)
+    
+    # Return mpAVI
+    return mpAVI(H, zeros(n_total, n_theta), f, A, B, b, ub=θub, lb=θlb)
+end
+####### END Type conversion functions #######
+
+####### Helper functions for optimal GNE selection ##########
+function filter_gne_crs!(sol::ParametricDAQP.Solution, game::StaticGNEP)
+    N = game.N
+    m_sh = length(game.b_sh)
+    n_local = sum(size(game.A_loc[i], 1) for i in 1:N)
+    shared_start = n_local + 1
+    
+    filter!(sol.CRs) do cr
+        for i in 1:m_sh
+            # Collect all rows of the reformulated constraints associated to the same shared constraints
+            player_row_indices = [shared_start + (p - 1) * m_sh + (i - 1) for p in 1:N]
+            # Check if they are all active / inactive
+            active_status = [row_idx ∈ cr.AS for row_idx in player_row_indices]
+            all_active = all(active_status)
+            none_active = !any(active_status)
+            # If they are neither all active or inactive, the region does not correspond to a set of GNEs
+            if !(all_active || none_active)
+                return false
+            end
+        end
+        return true
+    end
+    return length(sol.CRs)
+end
+
+function select_optimal_gne(
+    sol::ParametricDAQP.Solution,
+    ϕ::Function,
+    is_quadratic::Bool,
+    optimizer = Clarabel.Optimizer
+)::OptimalGNEResult
+    if !is_quadratic && optimizer == Clarabel.Optimizer
+        @warn "[select_optimal_gne!] Non-quadratic problem with Clarabel not supported. Switching to IPOPT."
+        optimizer = Ipopt.Optimizer
+    end
+    candidates = []
+    
+    for k in 1:length(sol.CRs)
+        CR_k = sol.CRs[k]
+        
+        # Extract region geometry
+        # Ath has shape n_θ × m_k; constraint is Ath'θ ≤ bth (see find_CR)
+        A_k = CR_k.Ath'  # m_k × n_θ
+        b_k = CR_k.bth
+        n_θ = size(A_k, 2)
+        
+        # Extract affine map: u = M_k θ + d_k from CR.z' * [θ; 1]
+        # CR.z is (n_θ+1) × n_u, so:
+        M_k = CR_k.z[1:end-1, :]'  # n_u × n_θ
+        d_k = vec(CR_k.z[end, :])   # n_u
+        n_u = size(M_k, 1)
+
+        # Construct optimization problem
+        if is_quadratic
+            # Quadratic problem: objective built by straightforward composition
+            model = Model(optimizer)
+            set_silent(model)
+            @variable(model, θ[1:n_θ])
+            @objective(model, Min, ϕ(M_k * θ .+ d_k))
+            @constraint(model, A_k * θ .<= b_k)
+        else
+            # Otherwise: add linear equality constraint
+            model = Model(optimizer)
+            set_silent(model)
+            @variable(model, θ[1:n_θ])
+            @variable(model, y[1:n_u])
+            @constraint(model, y .== M_k * θ .+ d_k)
+            @constraint(model, A_k * θ .<= b_k)
+            @operator(model, op_ϕ, m, (ys...) -> ϕ(collect(ys)))
+            @objective(model, Min, op_ϕ(y...))
+        end
+        
+        optimize!(model)
+        # Extract results only when optimal
+        if termination_status(model) == OPTIMAL
+            θ_opt = value.(θ)
+            obj_opt = objective_value(model)
+            push!(candidates, (θ=θ_opt, u=M_k * θ_opt + d_k, φ=obj_opt, region=k))
+        else
+            @warn "[select_optimal_gne!] Region $k skipped: termination status $(termination_status(model))"
+        end
+    end
+    
+    if isempty(candidates)
+        error("[select_optimal_gne!] No regions solved successfully.")
+    end
+    
+    # Global selection: pick best φ
+    φ_values = [c.φ for c in candidates]
+    k_best = argmin(φ_values)
+    best = candidates[k_best]
+    
+    return OptimalGNEResult(best.θ, best.u, best.φ, best.region, candidates)
+end
+
+####### END Helper functions for optimal GNE selection ##########
+
+####### Dynamics functions #######
+
+@doc raw"""
+    generate_prediction_model(A, Bi, T_hor)
 
 Constructs the prediction model matrices, ``\Gamma_i``, and ``\Theta``, and a vector ``\bar{c}`` for a discrete-time affine system
 ```math 
@@ -291,8 +466,13 @@ function generate_prediction_model(A::Vector{Matrix{Float64}},
 end
 
 
+"""
+    is_stabilizable(A, B) -> Bool
+
+Return `true` if the pair `(A, B)` is stabilizable, i.e. every unstable mode of `A`
+(eigenvalue with |λ| ≥ 1) is controllable. Uses the Hautus lemma.
+"""
 function is_stabilizable(A, B)
-    # Hautus lemma for stabilizability
     eigv_A = eigvals(A)
     n_x = size(A, 1)
     for λ in eigv_A
@@ -306,11 +486,15 @@ function is_stabilizable(A, B)
     return true
 end
 
+"""
+    is_detectable(A, C) -> Bool
+
+Return `true` if the pair `(A, C)` is detectable, i.e. every unstable mode of `A`
+(eigenvalue with |λ| ≥ 1) is observable. Uses the Hautus lemma.
+"""
 function is_detectable(A, C)
-    # Hautus lemma for stabilizability
     eigv_A = eigvals(A)
     n_x = size(A, 1)
-    is_stbl = true
     for λ in eigv_A
         if abs(λ) ≥ 1
             M = vcat(λ * I(n_x) - A, C)
@@ -321,30 +505,32 @@ function is_detectable(A, C)
     end
     return true
 end
+####### END Dynamics functions #######
 
+"""
+    compute_residual(prob::AVI, x::AbstractVector) -> Float64
+
+Compute the natural residual of the AVI at point `x`: the distance from `x` to its
+projection onto the feasible set along the VI mapping direction.
+"""
 function compute_residual(prob::AVI, x::AbstractVector)
     y = x - (prob.H * x + prob.f)
-    #TODO: Switch to Clarabel
     proj = DAQP.Model()
     DAQP.setup(proj, Matrix{Float64}(I, prob.n, prob.n), -y, Matrix{Float64}(prob.A), prob.b, Float64[], zeros(Cint, prob.m))
     x_transf, _, _, _ = DAQP.solve(proj)
-    r = norm(x - x_transf)
-    # qp = Clarabel.Solver()
-    # eye = spdiagm(0 => ones(Float64, prob.n))
-    # settings = Clarabel.Settings(verbose=false)
-    # cone = [Clarabel.NonnegativeConeT(size(prob.A, 1))] # Sets all constraints to inequalities
-    # Clarabel.setup!(qp, eye, -y, prob.A, prob.b, cone, settings)
-    # results = solveQPRobust(qp)
-    # r = norm(x - results.x)
-    # if results.status != :Solved
-    #     @warn "[compute_residual] QP solver returned $(results.status)"
-    # end
-    return r
+    return norm(x - x_transf)
 end
 
-```
-Set the limits of the parameter space to an mpAVI
-```
+@doc raw"""
+    setParameterSpace(mpavi::mpAVI; C, d, ub, lb) -> mpAVI
+
+Return a new `mpAVI` with updated parameter-space bounds. Any argument left as `nothing`
+retains the value from `mpavi`.
+
+# Keyword Arguments
+- `C`, `d`: Polytope constraint matrix and right-hand side (`Cθ ≤ d`).
+- `ub`, `lb`: Upper and lower box bounds on the parameter `θ`.
+"""
 function setParameterSpace(mpavi::mpAVI;
     C::Union{AbstractMatrix{Float64},Nothing}=nothing,
     d::Union{AbstractVector{Float64},Nothing}=nothing,

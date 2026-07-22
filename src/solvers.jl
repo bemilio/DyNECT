@@ -140,60 +140,12 @@ function CommonSolve.solve!(DR::DouglasRachford)
 end
 
 
+"""
+    MonvisoSolver
 
-# Log-domain interior point method [Liu, Liao-McPherson 2025]
-struct LogIPMSolver
-    prob::AVI
-    # Q::SparseMatrixCSC #Regularization matrix
-
-    x::Union{AbstractVector,Nothing}
-    status::Ref{Symbol}
-
-    stepsize::Float64
-    params::IterativeSolverParams
-
-end
-
-function CommonSolve.init(prob::AVI, ::Type{LogIPMSolver}; stepsize::Float64=0.5, params::IterativeSolverParams=IterativeSolverParams())
-
-
-    return LogIPMSolver(prob, x, Ref(:Initialized), stepsize, params)
-end
-
-function CommonSolve.step!(solver::LogIPMSolver)
-
-end
-
-function CommonSolve.solve!(solver::LogIPMSolver)
-    res = Inf
-    n_iter = 0
-    for k in 1:solver.params.max_iter
-        CommonSolve.step!(solver)
-        if solver.status[] == :Infeasible
-            @warn "[LogIPMSolver::solve] Infeasibility detected"
-            break
-        end
-        res = compute_residual(solver.prob, solver.x)
-        if res < solver.params.tol
-            solver.status[] = :Solved
-            n_iter = k
-            break
-        end
-        ((k % 1000 == 0) && solver.params.verbose) && println("Iteration $k, Residual = $res")
-        if k == solver.params.max_iter
-            solver.status[] = :MaximumIterationsReached
-            @warn "[LogIPMSolver::solve] Maximum iterations reached, residual = $res"
-            n_iter = k
-            break
-        end
-    end
-    solution = (x=solver.x, status=solver.status[], residual=res, iterations=n_iter)
-    return solution
-end
-
-
-# Compatibility layer with Monviso
-
+Wrapper around the [Monviso.jl](https://github.com/nicola-mignoni/Monviso.jl) projected
+gradient solver for AVIs. Uses JuMP + Clarabel to model the feasible set.
+"""
 struct MonvisoSolver
     prob::AVI
     monviso_vi::Monviso.VI
@@ -268,7 +220,15 @@ function CommonSolve.solve!(solver::MonvisoSolver)
     return solution
 end
 
-# DGSQP
+"""
+    DGSQPSolver
+
+Dual Gradient Squared QP solver for AVIs. Implements a watchdog line-search SQP method
+with Clarabel as the inner QP solver.
+
+Based on: E. L. Zhu and F. Borrelli, "A Sequential Quadratic Programming Approach to the
+Solution of Open-Loop Generalized Nash Equilibria," arXiv:2203.16478.
+"""
 struct DGSQPSolver
     prob::AVI
     x::AbstractVector{Float64}
@@ -363,14 +323,14 @@ function CommonSolve.step!(solver::DGSQPSolver)
             if merit_x_plus <= merit_x
                 break
             else
-                alpha .* 0.5
+                alpha *= 0.5
             end
         end
     end
     if merit_x_plus <= solver.merit_last[]
         solver.x .= x_plus
         solver.iter_last[] = solver.iter[]
-        solver.merit_last[] = merit_x_plus[]
+        solver.merit_last[] = merit_x_plus
         solver.use_relaxed_step[] = true
     else
         solver.use_relaxed_step[] = false
@@ -426,12 +386,19 @@ function CommonSolve.solve!(solver::DGSQPSolver)
 end
 
 
-#### DynLQGameTI solvers ####
+#### DynLQGame solvers ####
 
-# ADMM-CLQG
+"""
+    ADMMCLQGSolver
+
+ADMM-based solver for constrained dynamic LQ games.
+
+Based on: "ADMM-iCLQG: A Fast Solver of Constrained Dynamic Games for Planning
+Multi-Vehicle Feedback Trajectory."
+"""
 struct ADMMCLQGSolver
     # Stored quantities
-    prob::DynLQGameTI
+    prob::DynLQGame
     vi::AVI
     mpvi::mpAVI
     mpvi_reg::mpAVI
@@ -465,10 +432,10 @@ function update_x0!(solver::ADMMCLQGSolver, x0::Vector{Float64})
     vi = AVI(solver.mpvi, x0)
     solver.vi.f[:] = vi.f[:]
     solver.vi.b[:] = vi.b[:]
-    f[:] = AVI(solver.mpvi_reg, x0).f
+    solver.f[:] = AVI(solver.mpvi_reg, x0).f
 end
 
-function CommonSolve.init(prob::DynLQGameTI, ::Type{ADMMCLQGSolver};
+function CommonSolve.init(prob::DynLQGame, ::Type{ADMMCLQGSolver};
     T_hor::Union{Int,Nothing}=nothing,
     x0::Union{AbstractVector,Nothing}=nothing,
     ρ::Float64=0.5,
@@ -526,15 +493,6 @@ function CommonSolve.init(prob::DynLQGameTI, ::Type{ADMMCLQGSolver};
     Γ, _, Θ, k = generate_prediction_model(prob.A, prob.B, T_hor)
     predmod = (Γ=SparseMatrixCSC(Γ), Θ=SparseMatrixCSC(Θ), k=k)
 
-    # check for trivial infeasibility: A[i,:] = 0, b[i]<0 for some i
-    # zero_rows = findall(row -> norm(row) < params.tol, eachrow(prob.A))
-    # for idx_row in zero_rows
-    #     if prob.b[idx_row] < 0
-    #         #TODO: fix
-    #         return ADMMCLQGSolver(prob, Q, M2, M2minusQ, M2plusQ, M2x_plus_f, proj, y, x, Ref(:Infeasible), params)
-    #     end
-    # end
-
     return ADMMCLQGSolver(prob, vi, mpvi, mpvi_reg, predmod, x0, luH, f, proj_X, proj_U, # Stored quantities
         zeros(prob.nx * T_hor), zeros(sum(prob.nu) * T_hor), # Primal vars init
         zeros(prob.nx * T_hor), zeros(sum(prob.nu) * T_hor), # Dual vars init
@@ -568,7 +526,7 @@ function CommonSolve.step!(solver::ADMMCLQGSolver)
     solver.ω[:] = results.x
 
     if results.status in (Clarabel.PRIMAL_INFEASIBLE, Clarabel.DUAL_INFEASIBLE)
-        solver.x = NaN .* ones(solver.prob.n)
+        solver.x .= NaN
         solver.status[] = :Infeasible
         return solver
     end
@@ -623,8 +581,13 @@ end
 
 ##### mpAVI solvers #####
 
-# Compatibility layer with ParametricDAQP
+"""
+    ParametricDAQPSolver
 
+Wrapper around [ParametricDAQP.jl](https://github.com/darnstrom/ParametricDAQP.jl) for
+explicitly solving an `mpAVI` over its full parameter space. Produces a piecewise-affine
+solution that can be evaluated online via `evaluatePWA`.
+"""
 struct ParametricDAQPSolver
     mpAVI::mpAVI
     options::ParametricDAQP.Settings
@@ -649,21 +612,22 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     lowdim_tol::Float64=0.,
     daqp_settings=Dict{Symbol,Any}())
 
-    options = ParametricDAQP.Settings(eps_zero,
-        verbose,
-        store_AS,
-        store_points,
-        store_regions,
-        store_dual,
-        remove_redundant,
-        time_limit,
-        region_limit,
-        chunk_size,
-        factorization,
-        pivot,
-        postcheck_rank,
-        lowdim_tol,
-        daqp_settings)
+    options = ParametricDAQP.Settings(Dict{Symbol,Any}(
+        :eps_zero => eps_zero,
+        :verbose => verbose,
+        :store_AS => store_AS,
+        :store_points => store_points,
+        :store_regions => store_regions,
+        :store_dual => store_dual,
+        :remove_redundant => remove_redundant,
+        :time_limit => time_limit,
+        :region_limit => region_limit,
+        :chunk_size => chunk_size,
+        :factorization => factorization,
+        :postcheck_rank => postcheck_rank,
+        :lowdim_tol => lowdim_tol,
+        :daqp_settings => daqp_settings,
+    ))
 
 
     # Solve feasibility problem in (x,θ)-space to find initial active set:
@@ -672,7 +636,7 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     settings = Clarabel.Settings(verbose=false)
     A_θ = [prob.C; Matrix{Float64}(I(prob.n_θ)); -Matrix{Float64}(I(prob.n_θ))]
     b_θ = [prob.d; prob.ub; -prob.lb]
-    A_θ_x = SparseMatrixCSC([-hcat(prob.B...) prob.A; A_θ zeros(size(A_θ, 1), prob.n)])
+    A_θ_x = SparseMatrixCSC([-prob.B prob.A; A_θ zeros(size(A_θ, 1), prob.n)])
     b_θ_x = [prob.b; b_θ]
     cone = [Clarabel.NonnegativeConeT(size(A_θ_x, 1))] # Sets all constraints to inequalities
     H_θ_x = SparseMatrixCSC(Matrix{Float64}(I(prob.n_θ + prob.n)))
@@ -701,19 +665,82 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     end
 
     # Retrieve initial active set
-    AS0 = findall(prob.A * x .>= hcat(prob.B...) * θ + prob.b .- tol)
+    AS0 = findall(prob.A * x .>= prob.B * θ + prob.b .- tol)
     return ParametricDAQPSolver(prob, options, Ref(:Initialized), AS0)
 
 end
 
 function CommonSolve.solve!(pDAQP::ParametricDAQPSolver)
-    # Convert problem into ParametricDAQP format
     prob = ParametricDAQP.MPVI(pDAQP.mpAVI.H, pDAQP.mpAVI.F, pDAQP.mpAVI.f, pDAQP.mpAVI.A, pDAQP.mpAVI.B, pDAQP.mpAVI.b)
-    n_θ = size(pDAQP.mpAVI.C, 2)
     Θ = (A=pDAQP.mpAVI.C', b=pDAQP.mpAVI.d, ub=pDAQP.mpAVI.ub, lb=pDAQP.mpAVI.lb)
-    (sol, info) = ParametricDAQP.mpsolve(prob, Θ; opts=pDAQP.options, AS0=pDAQP.AS0)
+    (sol, _) = ParametricDAQP.mpsolve(prob, Θ; opts=pDAQP.options, AS0=pDAQP.AS0)
     return sol
 end
 
 
+### Static GNEP solvers
 
+struct NabetaniParametrizationSolver
+    gnep::StaticGNEP
+    mpavi::mpAVI
+    options::ParametricDAQP.Settings
+    status::Ref{Symbol}
+end
+
+function CommonSolve.init(gnep::StaticGNEP, ::Type{NabetaniParametrizationSolver}; θub=nothing, θlb=nothing, verbose::Int64=1)
+
+    options = ParametricDAQP.Settings(verbose=verbose)
+    mpavi = NabetaniParametrization(gnep, θub=θub, θlb=θlb)
+
+    return NabetaniParametrizationSolver(gnep, mpavi, options, Ref(:Initialized))
+end
+
+function CommonSolve.solve!(solver::NabetaniParametrizationSolver)
+    mpAVI = solver.mpavi
+
+    # Interface to call pDAQP
+    raw = (
+        H = mpAVI.H,
+        F = mpAVI.F,
+        f = mpAVI.f,
+        A = mpAVI.A,
+        B = mpAVI.B,
+        b = mpAVI.b,
+    )
+
+    Θ = (A  = mpAVI.C',
+         b  = mpAVI.d,
+         ub = mpAVI.ub,
+         lb = mpAVI.lb)
+
+    (sol, info) = ParametricDAQP.mpsolve(raw, Θ; opts = solver.options)
+    
+    # Remove critical regions not associated to Nash equilibria
+    filter_gne_crs!(sol, solver.gnep)
+    solver.status[] = :Solved
+    return sol
+end
+
+
+### Optimal GNEP solvers
+
+struct PWAConvexOptSolver
+    optGNEP::OptimalGNEP
+    status::Ref{Symbol}
+    verbose::Int64
+end
+
+function CommonSolve.init(optGNEP::OptimalGNEP, ::Type{PWAConvexOptSolver}; verbose::Int64=1)
+    return PWAConvexOptSolver(optGNEP, Ref(:Initialized), verbose)
+end
+
+function CommonSolve.solve!(solver::PWAConvexOptSolver)
+    GNEP = solver.optGNEP.GNEP
+    GNEPsol = CommonSolve.solve(GNEP, NabetaniParametrizationSolver; verbose=solver.verbose)
+    sol = select_optimal_gne(
+        GNEPsol,
+        solver.optGNEP.ϕ,
+        solver.optGNEP.is_quadratic)
+    solver.status[] = :Solved
+    return (x=sol.u_star, ϕ=sol.φ_star)
+end

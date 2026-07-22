@@ -1,25 +1,22 @@
 module DyNECT
 
-# Basic dependencies
 using LinearAlgebra, SparseArrays, MatrixEquations, BlockDiagonals, BlockArrays, CommonSolve
 
 # External solvers
-using DAQPBase, Clarabel, JuMP, Monviso, ParametricDAQP
+using DAQP, Clarabel, Ipopt, JuMP, Monviso, ParametricDAQP
 
 # Automatic differentiation
 using Zygote
-
-
-# CommonSolve
 
 include("types.jl")
 include("utils.jl")
 include("inf_hor_tools.jl")
 include("interfaces.jl")
-
-using CommonSolve
 include("solvers.jl")
-export DynLQGameTI, DynLQGameTV, DynLQGame2mpAVI
+
+export DynLQGame, DynLQGameTV, DynLQGame2mpAVI, AVI
+export StaticGNEP, OptimalGNEP
+import CommonSolve: solve  # Override the `solve` exported by DAQP
 export solve
 
 end

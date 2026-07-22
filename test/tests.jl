@@ -7,6 +7,7 @@ using MatrixEquations
 using CommonSolve
 
 
+
 @testset "DouglasRachford.jl" begin
     n = 2
     # [ 1 1      [-1  
@@ -76,7 +77,7 @@ end
     C_u_vec = [rand(mu, nu[i]) for i in 1:N]
     b_u = rand(mu)
 
-    prob = DynLQGameTI(
+    prob = DynLQGame(
         A=A,
         B=B,
         Q=Q,
@@ -125,7 +126,7 @@ end
     C_u_vec = [zeros(0, nu[i]) for i in 1:N]
     b_u = zeros(0)
 
-    prob = DynLQGameTI(
+    prob = DynLQGame(
         A=A,
         B=B,
         Q=Q,
@@ -139,7 +140,7 @@ end
 
     x = 10 * rand(nx)
 
-    # Solve infinite horizon problem 
+    # Solve infinite horizon problem
     P, K = DyNECT.solveOLNE(prob)
     prob.P[:] = P[:]
     u_inf = vcat(K...) * x
@@ -166,6 +167,165 @@ end
     @test norm(u_inf - u) < 1e-5
 end
 
+@testset "StaticGNEP" begin
+    # Scalar Rosen example using Nabetani reformulation + mpAVI solver
+    gnep = DyNECT.StaticGNEP(
+        Q = [[[1.;;], [-1.;;]], 
+             [[1.;;], [2.;;]]],
+        q = [[0.], [0.]],
+        A_loc = [zeros(0, 1), zeros(0, 1)],
+        b_loc = [Float64[], Float64[]],
+        A_sh = [[-1;;], [-1;;]],
+        b_sh = [-1.]
+    )
+    
+    θub = [5.0]
+    θlb = [-5.0]
+    sol = CommonSolve.solve(gnep, DyNECT.NabetaniParametrizationSolver; θub = θub, θlb = θlb, verbose = 0)
+
+    
+    # Test solution: x1 = 1 - x2, -1 < x2 < 0.5
+    tol = 1e-6
+    all_solutions_found = true
+    for θ in θlb[1]:0.1:θub[1]
+        x = DyNECT.evaluatePWA(sol, [θ])
+        if !isnothing(x)
+            all_solutions_found = all_solutions_found & (norm(x[1] - (1 - x[2])) < tol)
+            all_solutions_found = all_solutions_found & (-1.0 <= x[2] <= 0.5)
+        end
+    end
+    @test all_solutions_found
+end
+
+
+
+@testset "OptimalGNESelection" begin
+    # Jᵢ = |xᵢ-10|²
+    # x₁ + x₂ ≤ 1; 
+    # 4x₁ + x₁ ≤ 2
+
+    Q = [[[1.;;], [0.;;]], # Quadratic terms of agent 1 (Q₁₁, Q₁₂)
+        [[0.;;], [1.;;]]] # Quadratic terms of agent 1 (Q₂₁, Q₂₂)
+    q = [[-10.], 
+        [-10.]]
+    # A_loc = [zeros(0,1), zeros(0,1)] 
+    # b_loc = [zeros(0,0), zeros(0,0)]
+    A_loc = [[-1.;;], [-1.;;]] 
+    b_loc = [[0.], [0.]]
+    # x1 + x2 ≤ 1; 4x1 + x2 ≤ 2 
+    A_sh = [[1.; 
+            4.0;;], 
+            [1.0; 
+            1.0;;]]
+    b_sh = [1.; 
+            2.]
+
+    gnep = DyNECT.StaticGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
+
+    # restrict parameter space for reparametrization
+    θub =  [5.0; 5.0]
+    θlb = [-5.0; -5.0]
+    sol = CommonSolve.solve(gnep, DyNECT.NabetaniParametrizationSolver, θub = θub, θlb = θlb, verbose = 0)
+
+    # Test solution: x₂ = min(1 - x₁, 2 - 4x₁) for x₁ ∈ [0, .5]
+
+    tol = 1e-5
+    all_solutions_found = true
+    for test in 1:1000
+        θ = rand(2) .* (θub .- θlb) .+ θlb
+        x = DyNECT.evaluatePWA(sol, θ)
+
+        if !isnothing(x)
+            x2_sol = min(1-x[1], 2-4*x[1])
+            all_solutions_found = all_solutions_found & (norm(x[2] - x2_sol) < tol)
+            all_solutions_found = all_solutions_found & (0.0 <= x[1] <= 0.5)
+        end
+    end
+    @test all_solutions_found
+
+    # Test optimal selection: x_expected is the closest point on x₂ = min(1-x₁, 2-4x₁), x₁ ∈ [0, .5]
+    function closest_point_on_segment(P, A, B)
+        d = B - A
+        t = clamp(dot(P - A, d) / dot(d, d), 0.0, 1.0)
+        A + t * d
+    end
+
+    all_optima_found = true
+    for test in 1:1000
+        x_des = rand(2) * .5
+        ϕ(x) = sum(abs2, x - x_des) # |x-x_des|²
+        opt_gnep = OptimalGNEP(gnep, ϕ)
+        result = CommonSolve.solve(opt_gnep, DyNECT.PWAConvexOptSolver; verbose = 0)
+
+        proj1 = closest_point_on_segment(x_des, [0.0, 1.0], [1 / 3, 2 / 3])   # x2 = 1 - x1,  x1 ∈ [0, 1/3]
+        proj2 = closest_point_on_segment(x_des, [1 / 3, 2 / 3], [0.5, 0.0])  # x2 = 2 - 4x1, x1 ∈ [1/3, .5]
+        x_expected = norm(proj1 - x_des) <= norm(proj2 - x_des) ? proj1 : proj2
+        all_optima_found = all_optima_found & (norm(result.x - x_expected) < tol)
+    end
+    @test all_optima_found
+
+end
+
+@testset "infinite_horizon_CLNE.jl" begin
+    using Random
+    Random.seed!(1)
+
+    nx = 3
+    N = 3
+    nu = [2, 3, 4]
+    T_hor = 2
+
+    A = rand(nx, nx)
+    Bvec = [rand(nx, nu[j]) for j in 1:N]
+    Q = Vector{Matrix{Float64}}(undef, N)
+    for i = 1:N
+        Q[i] = 0.1 * rand(nx, nx) + Matrix{Float64}(I(nx))
+        Q[i] = Q[i] + Q[i]'
+    end
+    # Define R_i with only non-zero element (i,i)
+    R = [[zeros(nu[i], nu[j]) for j in 1:N] for i in 1:N]
+    for i in 1:N
+        R[i][i] .= Matrix{Float64}(1.0 * I(nu[i]))
+    end
+
+    # No Constraints
+    C_x = zeros(0, nx)
+    b_x = zeros(0)
+
+    C_loc_vec = [zeros(0, nu[i]) for i in 1:N]
+    b_loc_vec = [zeros(0) for i in 1:N]
+
+    C_u_vec = [zeros(0, nu[i]) for i in 1:N]
+    b_u = zeros(0)
+
+    prob = DynLQGame(
+        A=A,
+        B=Bvec,
+        Q=Q,
+        R=R,
+        C_x=C_x,
+        b_x=b_x,
+        C_loc_vec=C_loc_vec,
+        b_loc_vec=b_loc_vec,
+        C_u_vec=C_u_vec,
+        b_u=b_u)
+
+    x = 10 * rand(nx)
+
+    # Solve infinite horizon problem
+    P, K = DyNECT.solveCLNE(prob)
+
+    # Test solution
+    riccati_residual = 0.0
+    for i in 1:N
+        Acl_i = A + sum(Bvec[j] * K[j] for j in 1:N) - Bvec[i] * K[i]
+        _, _, K_ared, _, _ = ared(Acl_i, Bvec[i], R[i][i], Q[i], zeros(nx, nu[i]))
+        K_ared = -K_ared
+        riccati_residual = riccati_residual + norm(K[i] - K_ared)
+    end
+    @test riccati_residual < 1e-5
+
+end
 
 @testset "time_varying_LQ_game.jl" begin
     using Random
@@ -200,7 +360,7 @@ end
     C_u_vec = [rand(mu, nu[i]) for i in 1:N]
     b_u = rand(mu)
 
-    TIgame = DynLQGameTI(
+    TIgame = DynLQGame(
         A=A,
         B=B,
         Q=Q,
@@ -284,7 +444,7 @@ end
     C_u_vec = [rand(mu, nu[i]) for i in 1:N]
     b_u = rand(mu)
 
-    prob = DynLQGameTI(
+    prob = DynLQGame(
         A=A,
         B=B,
         Q=Q,

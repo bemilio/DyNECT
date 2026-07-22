@@ -1,5 +1,6 @@
 
-.vscode/launch.json
+.vscode/
+.claude/
 /docs/build
 pv_imp_results.csv
 *.csv
@@ -12,4 +13,9 @@ pv_imp_results.csv
 /src/python/DGSQP/DGSQP/__pycache__
 /src/python
 /.CondaPkg
-/python
+static_mpGNE/output/*.png
+static_mpGNE/output/*.pdf
+.claude/settings.json
+examples/Manifest.toml
+Manifest.toml
+*.png
