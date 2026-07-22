@@ -15,6 +15,7 @@ MatrixEquations = "99c1a7ee-ab34-5fd5-8076-27c950a045f4"
 Monviso = "1eb86b62-9073-48e6-9f04-fc5a45567986"
 ParametricDAQP = "19f72acb-e2a9-45c8-96b9-4d5487c8db2e"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
 julia = "1.9"
@@ -27,6 +28,10 @@ JuMP = "1"
 MatrixEquations = "2"
 Monviso = "0.1"
 ParametricDAQP = "0.6"
+
+[sources]
+Monviso = {url = "https://github.com/nicomignoni/Monviso.jl.git", rev = "vi-based"}
+ParametricDAQP = {url = "https://github.com/darnstrom/ParametricDAQP.jl"}
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

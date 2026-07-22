@@ -43,6 +43,12 @@ Normalises `θ` using `sol.translation` and `sol.scaling`, locates the correspon
 critical region, and returns the affine evaluation `z' * [θ_norm; 1]`.
 Returns `nothing` if `θ` falls outside all stored critical regions.
 """
+function arrange_vector_as_time_seq(u::Vector{Float64}, nu::Vector{Int64}, N::Int64, T_hor::Int64)
+    start_row_agent = cumsum(vcat(1,nu.*T_hor))
+    useq = [[u[start_row_agent[i] + (t-1)*nu[i] : start_row_agent[i] - 1 + t*nu[i]] for i=1:N] for t=1:T_hor]
+    return useq
+end
+
 function evaluatePWA(sol::ParametricDAQP.Solution, θ::Vector{Float64})
     θ_normalized = (θ - sol.translation) .* sol.scaling
     CR = find_CR(θ_normalized, sol)

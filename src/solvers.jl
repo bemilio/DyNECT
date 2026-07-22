@@ -140,7 +140,6 @@ function CommonSolve.solve!(DR::DouglasRachford)
 end
 
 
-
 """
     MonvisoSolver
 
@@ -491,7 +490,7 @@ function CommonSolve.init(prob::DynLQGame, ::Type{ADMMCLQGSolver};
     Clarabel.setup!(proj_U, Q, q, Cu, du, cone, settings)
 
     # Store prediction model for the linear system
-    Γ, _, Θ, k = generate_prediction_model(prob.A, prob.Bi, T_hor)
+    Γ, _, Θ, k = generate_prediction_model(prob.A, prob.B, T_hor)
     predmod = (Γ=SparseMatrixCSC(Γ), Θ=SparseMatrixCSC(Θ), k=k)
 
     return ADMMCLQGSolver(prob, vi, mpvi, mpvi_reg, predmod, x0, luH, f, proj_X, proj_U, # Stored quantities
@@ -608,6 +607,7 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     region_limit::Int64=Int(1e12),
     chunk_size::Int64=1000,
     factorization::Symbol=:chol,
+    pivot::Bool=false,
     postcheck_rank::Bool=true,
     lowdim_tol::Float64=0.,
     daqp_settings=Dict{Symbol,Any}())
@@ -636,7 +636,7 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     settings = Clarabel.Settings(verbose=false)
     A_θ = [prob.C; Matrix{Float64}(I(prob.n_θ)); -Matrix{Float64}(I(prob.n_θ))]
     b_θ = [prob.d; prob.ub; -prob.lb]
-    A_θ_x = SparseMatrixCSC([-prob.B prob.A; A_θ zeros(size(A_θ, 1), prob.n)])
+    A_θ_x = SparseMatrixCSC([-hcat(prob.B...) prob.A; A_θ zeros(size(A_θ, 1), prob.n)])
     b_θ_x = [prob.b; b_θ]
     cone = [Clarabel.NonnegativeConeT(size(A_θ_x, 1))] # Sets all constraints to inequalities
     H_θ_x = SparseMatrixCSC(Matrix{Float64}(I(prob.n_θ + prob.n)))
@@ -665,7 +665,7 @@ function CommonSolve.init(prob::mpAVI, ::Type{ParametricDAQPSolver};
     end
 
     # Retrieve initial active set
-    AS0 = findall(prob.A * x .>= prob.B * θ + prob.b .- tol)
+    AS0 = findall(prob.A * x .>= hcat(prob.B...) * θ + prob.b .- tol)
     return ParametricDAQPSolver(prob, options, Ref(:Initialized), AS0)
 
 end
@@ -681,15 +681,15 @@ end
 ### Static GNEP solvers
 
 struct NabetaniParametrizationSolver
-    gnep::StaticGNEGame
+    gnep::StaticGNEP
     mpavi::mpAVI
     options::ParametricDAQP.Settings
     status::Ref{Symbol}
 end
 
-function CommonSolve.init(gnep::StaticGNEGame, ::Type{NabetaniParametrizationSolver}; θub=nothing, θlb=nothing) 
-    
-    options = ParametricDAQP.Settings(verbose=true)
+function CommonSolve.init(gnep::StaticGNEP, ::Type{NabetaniParametrizationSolver}; θub=nothing, θlb=nothing, verbose::Int64=1)
+
+    options = ParametricDAQP.Settings(verbose=verbose)
     mpavi = NabetaniParametrization(gnep, θub=θub, θlb=θlb)
 
     return NabetaniParametrizationSolver(gnep, mpavi, options, Ref(:Initialized))
@@ -727,15 +727,16 @@ end
 struct PWAConvexOptSolver
     optGNEP::OptimalGNEP
     status::Ref{Symbol}
+    verbose::Int64
 end
 
-function CommonSolve.init(optGNEP::OptimalGNEP, ::Type{PWAConvexOptSolver}) 
-    return PWAConvexOptSolver(optGNEP, Ref(:Initialized))
+function CommonSolve.init(optGNEP::OptimalGNEP, ::Type{PWAConvexOptSolver}; verbose::Int64=1)
+    return PWAConvexOptSolver(optGNEP, Ref(:Initialized), verbose)
 end
 
 function CommonSolve.solve!(solver::PWAConvexOptSolver)
     GNEP = solver.optGNEP.GNEP
-    GNEPsol = CommonSolve.solve(GNEP, NabetaniParametrizationSolver)
+    GNEPsol = CommonSolve.solve(GNEP, NabetaniParametrizationSolver; verbose=solver.verbose)
     sol = select_optimal_gne(
         GNEPsol,
         solver.optGNEP.ϕ,

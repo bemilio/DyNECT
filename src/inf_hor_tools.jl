@@ -31,7 +31,7 @@ function solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
         @warn "[solveInfHorOL] The matrix A is singular"
     end
     for i in 1:game.N
-        if !is_stabilizable(game.A, game.Bi[i])
+        if !is_stabilizable(game.A, game.B[i])
             @warn "[solveInfHorOL] The system is not stabilizable for agent $i"
         end
         if !is_detectable(game.A, game.Q[i])
@@ -40,16 +40,16 @@ function solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
     end
     P = [zeros(game.nx, game.nx) for _ in 1:game.N]
     Rinv = BlockDiagonal([inv(game.R[i][i]) for i in 1:game.N])
-    RinvB = Rinv * BlockDiagonal(game.Bi)'
+    RinvB = Rinv * BlockDiagonal(game.B)'
     # Matrix S: multiply by col(P_i) to get \sum B_i * R_i_inv * B_i' * P_i 
-    S = game.B * RinvB # dim. (n_x,  N *nx)
+    S = hcat(game.B...) * RinvB # dim. (n_x,  N *nx)
 
     # Initialize to cooperative optimum
     R_all = BlockDiagonal([game.R[i][i] for i in 1:game.N])
-    P_0, _, K, _, _ = ared(game.A, game.B, R_all, sum(game.Q), zeros(game.nx, sum(game.nu)))
+    P_0, _, K, _, _ = ared(game.A, hcat(game.B...), R_all, sum(game.Q), zeros(game.nx, sum(game.nu)))
     K = -K # Controller convention
     for k = 1:max_iter
-        A_cl = game.A + game.B * K
+        A_cl = game.A + hcat(game.B...) * K
         for i = 1:game.N
             try
                 P[i] = (1 - stepsize) * P[i] + stepsize * sylvd(-game.A', A_cl, game.Q[i]) # Solves P[i] - A' * P[i] * A_cl = Q[i]
@@ -59,7 +59,7 @@ function solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
             end
         end
         A_cl = (I(game.nx) + S * vcat(P...)) \ game.A # Closed loop matrix
-        K = -RinvB * vcat(P...) * A_cl # K_i = Ri_inv * Bi'* Pi * A_cl
+        K = -RinvB * vcat(P...) * A_cl # K_i = Ri_inv * B'* Pi * A_cl
         if mod(k, 10) == 0
             # Test solution: Check if (9) [Freiling-Jank-Kandil '99] is satisfied
             err = 0
@@ -96,11 +96,11 @@ function solveExtendedARE(game::DynLQGame, K::Vector{<:AbstractMatrix})
     K_ext = [zeros(nu, 2 * nx) for nu in game.nu]
     for i = 1:game.N
         others = [j for j in 1:game.N if j != i]
-        BjKj = sum([game.Bi[j] * K[j] for j in others])
-        A_ol = game.A + game.B * vcat(K...)
+        BjKj = sum([game.B[j] * K[j] for j in others])
+        A_ol = game.A + hcat(game.B...) * vcat(K...)
         A_ext = [game.A BjKj;
             zeros(nx, nx) A_ol]
-        B_ext = [game.Bi[i]; zeros(nx, game.nu[i])]
+        B_ext = [game.B[i]; zeros(nx, game.nu[i])]
         Q_ext = [game.Q[i] zeros(nx, nx); zeros(nx, nx) zeros(nx, nx)]
         R_ext = game.R[i][i]
         P_ext[i], _, K_ext[i], _, _ = ared(A_ext, B_ext, R_ext, Q_ext, zeros(2 * nx, game.nu[i]))
@@ -134,7 +134,7 @@ function solveCLNE(game::DynLQGame; max_iter=1000, stepsize=0.1)
     end
 
     # Initialize to collaborative LQR
-    _, _, K_collab, _,_ = ared(game.A, hcat(game.Bi...), Matrix{Float64}(I, sum(game.nu), sum(game.nu)), Matrix(I, game.nx, game.nx), zeros(game.nx, sum(game.nu)))
+    _, _, K_collab, _,_ = ared(game.A, hcat(game.B...), Matrix{Float64}(I, sum(game.nu), sum(game.nu)), Matrix(I, game.nx, game.nx), zeros(game.nx, sum(game.nu)))
     K_collab = - K_collab
     eps_err = 1e-5
 
@@ -145,8 +145,8 @@ function solveCLNE(game::DynLQGame; max_iter=1000, stepsize=0.1)
     for k=1:max_iter
         for i in 1:game.N
             # println("Solving are, iter. $k, agent $i")
-            Acl_i = game.A + sum(game.Bi[j] * K[j] for j in 1:game.N) - game.Bi[i] * K[i]
-            P[i], _, K_ared, _, _ = ared(Acl_i, game.Bi[i], game.R[i][i], game.Q[i], zeros(game.nx, game.nu[i]))
+            Acl_i = game.A + sum(game.B[j] * K[j] for j in 1:game.N) - game.B[i] * K[i]
+            P[i], _, K_ared, _, _ = ared(Acl_i, game.B[i], game.R[i][i], game.Q[i], zeros(game.nx, game.nu[i]))
             K_ared = -K_ared
             K[i] = (1 - stepsize) * K[i] + stepsize * K_ared
         end
@@ -154,8 +154,8 @@ function solveCLNE(game::DynLQGame; max_iter=1000, stepsize=0.1)
         riccati_residual = 0.0
 
         for i in 1:game.N
-            Acl_i = game.A + sum(game.Bi[j] * K[j] for j in 1:game.N) - game.Bi[i] * K[i]
-            _, _, K_ared, _, _ = ared(Acl_i, game.Bi[i], game.R[i][i], game.Q[i], zeros(game.nx, game.nu[i]))
+            Acl_i = game.A + sum(game.B[j] * K[j] for j in 1:game.N) - game.B[i] * K[i]
+            _, _, K_ared, _, _ = ared(Acl_i, game.B[i], game.R[i][i], game.Q[i], zeros(game.nx, game.nu[i]))
             K_ared = -K_ared
             riccati_residual = riccati_residual + norm(K[i] - K_ared)
         end

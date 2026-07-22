@@ -5,13 +5,16 @@ using LinearAlgebra, SparseArrays, MatrixEquations, BlockDiagonals, BlockArrays,
 # External solvers
 using DAQP, Clarabel, Ipopt, JuMP, Monviso, ParametricDAQP
 
+# Automatic differentiation
+using Zygote
+
 include("types.jl")
 include("utils.jl")
 include("inf_hor_tools.jl")
 include("interfaces.jl")
 include("solvers.jl")
 
-export DynLQGame, DynLQGame2mpAVI, AVI
+export DynLQGame, DynLQGameTV, DynLQGame2mpAVI, AVI
 export StaticGNEP, OptimalGNEP
 import CommonSolve: solve  # Override the `solve` exported by DAQP
 export solve
