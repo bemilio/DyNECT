@@ -518,7 +518,6 @@ struct StaticGNEP #
     end 
 end #
  
-struct mpAVI #src usage
 @doc raw"""
     mpAVI
 
@@ -542,6 +541,7 @@ with parameter set ``\theta \in \{C\theta \leq d\} \cap \{lb \leq \theta \leq ub
 - `m`: Number of constraints.
 - `n_θ`: Number of parameters.
 """
+struct mpAVI #src usage
     # VI(Hx + Fθ + f, Ax ≤ Bθ + b)
     # With θ ∈ { Cθ ≤ d } ∩ { lb ≤ θ ≤ ub }
     H::AbstractMatrix # size = n_x * n_x
