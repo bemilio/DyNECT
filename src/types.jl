@@ -89,7 +89,7 @@ end
 
 
 @doc raw"""
-DynLQGameTI
+DynLQGame
 
 Time-invariant tynamic Nash Equilibrium Problem.
 The linear dynamics are given by the equation:
@@ -102,7 +102,7 @@ The objective for agent i is
     \sum_{j\neq i}\left(\langle u_i[t], R_{ij}u_j[t]\rangle\right) + \langle x[t], q_i\rangle + \langle u_i[t], r_i\rangle \right\}
 ``` 
 # Constructor
-`DynLQGameTI(;
+`DynLQGame(;
     A::Matrix{Float64},
     Bvec::Vector{Matrix{Float64}},
     c::Vector{Float64},
@@ -141,7 +141,7 @@ The objective for agent i is
 - `C_u_i::Vector{SubArray{Float64,2}}`: Views on `C_u` for each agent, each size mˢʰ⨯nᵤⁱ
 - `m_u::Int64`: Number of shared input constraints.
 """
-struct DynLQGameTI # Dynamic time-invariant Nash equilibrium problem
+struct DynLQGame # Dynamic time-invariant Nash equilibrium problem
     nx::Int64
     nu::Vector{Int64}
     N::Int64
@@ -173,7 +173,7 @@ struct DynLQGameTI # Dynamic time-invariant Nash equilibrium problem
     C_u_i::Vector{SubArray{Float64,2}} # Views on C_u
     m_u::Int64 # number of input constraints
 
-    function DynLQGameTI(; # Constructor for time-invariant game
+    function DynLQGame(; # Constructor for time-invariant game
         A::Matrix{Float64},
         B::Vector{Matrix{Float64}},
         c::Union{Nothing,Vector{Float64}}=nothing, # Defaults to 0
@@ -457,7 +457,7 @@ struct DynLQGameTV # Dynamic time-Variant Nash equilibrium problem
 end
 
 #added v_static_mpGNE
-struct StaticGNEGame #
+struct StaticGNEP #
     N::Int
     n::Vector{Int}
     Q::Vector{Vector{Matrix{Float64}}}
@@ -467,7 +467,7 @@ struct StaticGNEGame #
     A_sh::Vector{Matrix{Float64}}
     b_sh::Vector{Float64}
  
-    function StaticGNEGame(
+    function StaticGNEP(
         Q::Vector{Vector{Matrix{Float64}}},
         q::AbstractVector,
         A_loc::AbstractVector,
@@ -513,8 +513,8 @@ struct StaticGNEGame #
         return new(N, n, Q, q, A_loc, b_loc, A_sh, b_sh) 
     end 
 
-    function StaticGNEGame(; Q, q, A_loc, b_loc, A_sh, b_sh) 
-        StaticGNEGame(Q, q, A_loc, b_loc, A_sh, b_sh) 
+    function StaticGNEP(; Q, q, A_loc, b_loc, A_sh, b_sh) 
+        StaticGNEP(Q, q, A_loc, b_loc, A_sh, b_sh) 
     end 
 end #
  
@@ -655,11 +655,11 @@ function AVI(mpAVI::mpAVI, θ::AbstractVector)
 end
 
 struct OptimalGNEP
-    GNEP::StaticGNEGame
+    GNEP::StaticGNEP
     ϕ::Function
     is_quadratic::Bool
     function OptimalGNEP(
-        GNEP::StaticGNEGame,
+        GNEP::StaticGNEP,
         Q::AbstractMatrix,
         q::AbstractVector
     )
@@ -676,7 +676,7 @@ struct OptimalGNEP
         return new(GNEP, ϕ, true)
     end
     function OptimalGNEP(
-        GNEP::StaticGNEGame,
+        GNEP::StaticGNEP,
         ϕ::Function
     )   
         # Check if ϕ is quadratic

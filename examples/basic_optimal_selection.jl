@@ -30,7 +30,7 @@ A_sh = [[1.;
 b_sh = [1.; 
         2.]
 
-gnep = DyNECT.StaticGNEGame(Q, q, A_loc, b_loc, A_sh, b_sh)
+gnep = DyNECT.StaticGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
 
 # ============================================================================
 # Test 1: Parametric solution of GNE problem

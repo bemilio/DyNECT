@@ -31,7 +31,7 @@ C_u = [zeros(0, 1), zeros(0, 1)]
 b_u = zeros(0)
 
 # Construct game
-game = DynLQGameTI(
+game = DynLQGame(
     A=A,
     B=B,
     Q=Q,

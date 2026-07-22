@@ -22,7 +22,7 @@ b_loc = [[], []] # No local constraints
 A_sh = [[-1;;], [-1;;]]
 b_sh = [-1.]
 
-gnep = DyNECT.StaticGNEGame(Q, q, A_loc, b_loc, A_sh, b_sh)
+gnep = DyNECT.StaticGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
 
 # ============================================================================
 # Step 2: Solve parametrically
