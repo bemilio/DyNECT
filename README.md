@@ -58,6 +58,8 @@ regulator for constrained multi-agent systems_ E. Benenati, G. Belgioioso, 2025]
 - Collection of state-of-the-art iterative and explicit solvers for open-loop dynamic games  
 - Utility tools for streamlined implementation of game-theoretic MPC
 - Automatic reformulation of LQ games as (multi-parametric) Variational Inequalities (VIs)
+- Iterative LQ approximation of general nonlinear dynamic games (`LQapprox`), including
+  support for exogenous, time-varying parameters (e.g. references, disturbances)
 - Solution of coupled Riccati equations arising in unconstrained infinite-horizon games  
 - Integration with [Monviso](https://github.com/nicomignoni/Monviso.jl) for access to multiple VI solution algorithms
 - Integration with [pDAQP](https://github.com/darnstrom/ParametricDAQP.jl/pull/19) for offline precomputation of state-to-solution map, enabling fast online control

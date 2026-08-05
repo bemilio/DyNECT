@@ -1,3 +1,38 @@
+@doc raw"""
+    DynGame
+
+Description of a general (possibly nonlinear) dynamic Nash equilibrium problem. Used as
+the starting point for the iterative LQ approximation performed by [`LQapprox`](@ref),
+which linearizes the dynamics and quadratizes the objectives around a given input/state
+trajectory.
+
+By default, every user-supplied function has the signature below (no `γ`):
+- `f(x, u_1, ..., u_N)`: dynamics, `x⁺ = f(x, u)`.
+- `J[i](x, u_1, ..., u_N)`: objective of agent `i`.
+- `gx(x)`: state constraints, `gx(x) ≤ 0`.
+- `gu(u_1, ..., u_N)`: shared input constraints, `gu(u) ≤ 0`.
+- `gloc[i](u_i)`: local input constraints of agent `i`, `gloc[i](u_i) ≤ 0`.
+
+Optionally, all of `f`, `J[i]`, `gx`, `gu`, `gloc[i]` can instead accept a trailing
+argument `γ` (in that case *all* of them must, consistently), an exogenous, possibly
+time-varying parameter that is not optimized over (e.g. a reference trajectory, a
+disturbance, or another agent's prediction). This second calling convention is only used
+when `γ` is explicitly passed to [`LQapprox`](@ref); games that don't need a
+time-varying parameter can ignore this and keep the signatures above unchanged.
+
+# Fields
+- `f::Function`: dynamics.
+- `J::Vector{Function}`: objective of each agent.
+- `gx::Function`: state constraints.
+- `gu::Function`: shared input constraints.
+- `gloc::Vector{Function}`: local input constraints of each agent.
+- `nx::Int64`: number of states.
+- `nu::Vector{Int64}`: number of inputs per agent.
+- `mx::Int64`: number of state constraints.
+- `mu::Int64`: number of shared input constraints.
+- `mloc::Vector{Int64}`: number of local input constraints per agent.
+- `N::Int64`: number of agents.
+"""
 struct DynGame
     ## Control problem quantities
     f::Function # dynamics
@@ -16,15 +51,36 @@ struct DynGame
 
 end
 
-function LQapprox(game::DynGame, 
-    u::AbstractVector{<:AbstractVector{<:AbstractVector}}, 
-    x0::AbstractVector, 
+@doc raw"""
+    LQapprox(game, u, x0, T_hor, γ=nothing)
+
+Linearize the dynamics and quadratize the objectives of `game` (a [`DynGame`](@ref))
+along the horizon `T_hor`, around the input sequence `u` and initial state `x0`,
+returning the resulting [`DynLQGameTV`](@ref) time-varying LQ game.
+
+# Arguments
+- `game::DynGame`: the (possibly nonlinear) dynamic game to approximate.
+- `u::AbstractVector{<:AbstractVector{<:AbstractVector}}`: input sequence to linearize
+  around; `u[t][i]` is the input of agent `i` at time `t`.
+- `x0::AbstractVector`: initial state.
+- `T_hor::Int64`: horizon length.
+- `γ::Union{Nothing,AbstractVector{<:AbstractVector}}=nothing`: exogenous, possibly
+  time-varying parameter passed to `game.f`, `game.J`, `game.gx`, `game.gu` and
+  `game.gloc` at every timestep, with `γ[t]` the parameter at time `t` (e.g. a reference
+  trajectory or an external disturbance). If `nothing` (the default), `game`'s functions
+  are called without a trailing `γ` argument, so existing games are unaffected. If a
+  `γ` is passed, `game`'s functions must all accept the trailing `γ` argument. See
+  [`DynGame`](@ref).
+"""
+function LQapprox(game::DynGame,
+    u::AbstractVector{<:AbstractVector{<:AbstractVector}},
+    x0::AbstractVector,
     T_hor::Int64, # Could possibly be inferred as length of u
     γ::Union{Nothing,AbstractVector{<:AbstractVector}}=nothing # Parameters / exhogenous inputs for J, f, gx, gu
     )
 
     xt = copy(x0)
-    γ = γ === nothing ? [Float64[] for _ in 1:T_hor] : γ # If γ is nothing, parameters are empty vectors
+    has_param = γ !== nothing # If false, game's functions are not called with a trailing γ argument
 
     A =  [Matrix{Float64}(undef, game.nx, game.nx) for _ in 1:T_hor]
     B = [[Matrix{Float64}(undef, game.nx, nui) for nui in game.nu] for _ in 1:T_hor]
@@ -41,34 +97,36 @@ function LQapprox(game::DynGame,
 
 
     for t=1:T_hor
+        γt = has_param ? (γ[t],) : () # Trailing γ argument, empty tuple if game has no parameter
+
         # Linearize dynamics
-        Jac_f_t = Zygote.jacobian(game.f, xt, u[t]..., γ[t])
+        Jac_f_t = Zygote.jacobian(game.f, xt, u[t]..., γt...)
         A[t] .= Jac_f_t[1]
         B[t] .= Jac_f_t[2:game.N+1]
-        
+
         # Linearize state constraints
-        Cx[t] .= Zygote.jacobian(game.gx, xt, γ[t])[1]
-        bx[t] .= -game.gx(xt, γ[t])
+        Cx[t] .= Zygote.jacobian(game.gx, xt, γt...)[1]
+        bx[t] .= -game.gx(xt, γt...)
 
         # Linearize input constraints
-        Cu[t] .= Zygote.jacobian(game.gu, u[t]..., γ[t])[1:game.N]
-        bu[t] .= -game.gu(u[t]..., γ[t])
+        Cu[t] .= Zygote.jacobian(game.gu, u[t]..., γt...)[1:game.N]
+        bu[t] .= -game.gu(u[t]..., γt...)
 
         # Linearize local input constraints
-        
-        Cloc[t] .= [Zygote.jacobian(game.gloc[i], u[t][i], γ[t])[1] for i in 1:game.N] 
-        bloc[t] .= -[game.gloc[i](u[t][i], γ[t]) for i in 1:game.N]
+
+        Cloc[t] .= [Zygote.jacobian(game.gloc[i], u[t][i], γt...)[1] for i in 1:game.N]
+        bloc[t] .= -[game.gloc[i](u[t][i], γt...) for i in 1:game.N]
 
         # Quadratize objectives
         for i=1:game.N
-            H, Hij = block_hessian(game.J[i], xt, u[t]..., γ[t])
+            H, Hij = block_hessian(game.J[i], xt, u[t]..., γt...)
             # t>=2 && println("size of Qti = $(Q[t-1][i])")
             if t>=2
                 Q[t-1][i] .= Hij[(1,1)]
             end
             R[t][i] .= [Hij[(1+i, 1+j)] for j in 1:game.N] # Hessian with respect to ui, uj
 
-            grad_Ji = Zygote.gradient(game.J[i], xt, u[t]..., γ[t]) 
+            grad_Ji = Zygote.gradient(game.J[i], xt, u[t]..., γt...)
             if t>=2
                 q[t-1][i] .= grad_Ji[1]
             end
@@ -76,7 +134,7 @@ function LQapprox(game::DynGame,
         end
 
         # # Propagate dynamics
-        xt = game.f(xt, u[t]..., γ[t])
+        xt = game.f(xt, u[t]..., γt...)
     end
 
     LQgame = DynLQGameTV(
