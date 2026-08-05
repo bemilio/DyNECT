@@ -16,8 +16,16 @@ struct DynGame
 
 end
 
-function LQapprox(game::DynGame, u::Vector{Vector{Vector{Float64}}}, x0::Vector{Float64}, T_hor::Int64)
+function LQapprox(game::DynGame, 
+    u::AbstractVector{<:AbstractVector{<:AbstractVector}}, 
+    x0::AbstractVector, 
+    T_hor::Int64, # Could possibly be inferred as length of u
+    γ::Union{Nothing,AbstractVector{<:AbstractVector}}=nothing # Parameters / exhogenous inputs for J, f, gx, gu
+    )
+
     xt = copy(x0)
+    γ = γ === nothing ? [Float64[] for _ in 1:T_hor] : γ # If γ is nothing, parameters are empty vectors
+
     A =  [Matrix{Float64}(undef, game.nx, game.nx) for _ in 1:T_hor]
     B = [[Matrix{Float64}(undef, game.nx, nui) for nui in game.nu] for _ in 1:T_hor]
     Cx = [Matrix{Float64}(undef, game.mx, game.nx) for _ in 1:T_hor]
@@ -34,32 +42,33 @@ function LQapprox(game::DynGame, u::Vector{Vector{Vector{Float64}}}, x0::Vector{
 
     for t=1:T_hor
         # Linearize dynamics
-        Jac_f_t = Zygote.jacobian(game.f, xt, u[t]...)
+        Jac_f_t = Zygote.jacobian(game.f, xt, u[t]..., γ[t])
         A[t] .= Jac_f_t[1]
-        B[t] .= Jac_f_t[2:end]
+        B[t] .= Jac_f_t[2:game.N+1]
         
         # Linearize state constraints
-        Cx[t] .= Zygote.jacobian(game.gx, xt)[1]
-        bx[t] .= -game.gx(xt)
+        Cx[t] .= Zygote.jacobian(game.gx, xt, γ[t])[1]
+        bx[t] .= -game.gx(xt, γ[t])
 
         # Linearize input constraints
-        Cu[t] .= Zygote.jacobian(game.gu, u[t]...)
-        bu[t] .= -game.gu(u[t]...)
+        Cu[t] .= Zygote.jacobian(game.gu, u[t]..., γ[t])[1:game.N]
+        bu[t] .= -game.gu(u[t]..., γ[t])
 
         # Linearize local input constraints
-        Cloc[t] .= [Zygote.jacobian(game.gloc[i], u[t][i])[1] for i in 1:game.N] 
-        bloc[t] .= -[game.gloc[i](u[t][i]) for i in 1:game.N]
+        
+        Cloc[t] .= [Zygote.jacobian(game.gloc[i], u[t][i], γ[t])[1] for i in 1:game.N] 
+        bloc[t] .= -[game.gloc[i](u[t][i], γ[t]) for i in 1:game.N]
 
         # Quadratize objectives
         for i=1:game.N
-            H, Hij = block_hessian(game.J[i], xt, u[t]...)
+            H, Hij = block_hessian(game.J[i], xt, u[t]..., γ[t])
             # t>=2 && println("size of Qti = $(Q[t-1][i])")
             if t>=2
                 Q[t-1][i] .= Hij[(1,1)]
             end
             R[t][i] .= [Hij[(1+i, 1+j)] for j in 1:game.N] # Hessian with respect to ui, uj
 
-            grad_Ji = Zygote.gradient(game.J[i], xt, u[t]...) 
+            grad_Ji = Zygote.gradient(game.J[i], xt, u[t]..., γ[t]) 
             if t>=2
                 q[t-1][i] .= grad_Ji[1]
             end
@@ -67,7 +76,7 @@ function LQapprox(game::DynGame, u::Vector{Vector{Vector{Float64}}}, x0::Vector{
         end
 
         # # Propagate dynamics
-        xt = game.f(xt, u[t]...)
+        xt = game.f(xt, u[t]..., γ[t])
     end
 
     LQgame = DynLQGameTV(
