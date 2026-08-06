@@ -681,13 +681,13 @@ end
 ### Static GNEP solvers
 
 struct NabetaniParametrizationSolver
-    gnep::StaticGNEP
+    gnep::StaticLQGNEP
     mpavi::mpAVI
     options::ParametricDAQP.Settings
     status::Ref{Symbol}
 end
 
-function CommonSolve.init(gnep::StaticGNEP, ::Type{NabetaniParametrizationSolver}; θub=nothing, θlb=nothing, verbose::Int64=1)
+function CommonSolve.init(gnep::StaticLQGNEP, ::Type{NabetaniParametrizationSolver}; θub=nothing, θlb=nothing, verbose::Int64=1)
 
     options = ParametricDAQP.Settings(verbose=verbose)
     mpavi = NabetaniParametrization(gnep, θub=θub, θlb=θlb)
@@ -722,25 +722,27 @@ function CommonSolve.solve!(solver::NabetaniParametrizationSolver)
 end
 
 
-### Optimal GNEP solvers
+### Bilevel game solvers
 
 struct PWAConvexOptSolver
-    optGNEP::OptimalGNEP
+    bilevel_game::BilevelGame
     status::Ref{Symbol}
     verbose::Int64
 end
 
-function CommonSolve.init(optGNEP::OptimalGNEP, ::Type{PWAConvexOptSolver}; verbose::Int64=1)
-    return PWAConvexOptSolver(optGNEP, Ref(:Initialized), verbose)
+function CommonSolve.init(bilevel_game::BilevelGame, ::Type{PWAConvexOptSolver}; verbose::Int64=1)
+    @assert bilevel_game.n_γ == 0 "[PWAConvexOptSolver] does not support a leader parametrization (n_γ = $(bilevel_game.n_γ)); it only selects the point in the Nash equilibrium set of LowLevelGNEP that minimizes ϕ"
+    return PWAConvexOptSolver(bilevel_game, Ref(:Initialized), verbose)
 end
 
 function CommonSolve.solve!(solver::PWAConvexOptSolver)
-    GNEP = solver.optGNEP.GNEP
+    GNEP = solver.bilevel_game.LowLevelGNEP.game
     GNEPsol = CommonSolve.solve(GNEP, NabetaniParametrizationSolver; verbose=solver.verbose)
+    ϕ_x = x -> solver.bilevel_game.ϕ(Float64[], x)
     sol = select_optimal_gne(
         GNEPsol,
-        solver.optGNEP.ϕ,
-        solver.optGNEP.is_quadratic)
+        ϕ_x,
+        solver.bilevel_game.is_quadratic)
     solver.status[] = :Solved
     return (x=sol.u_star, ϕ=sol.φ_star)
 end

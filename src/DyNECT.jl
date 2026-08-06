@@ -15,7 +15,7 @@ include("interfaces.jl")
 include("solvers.jl")
 
 export DynLQGame, DynLQGameTV, DynLQGame2mpAVI, AVI
-export StaticGNEP, OptimalGNEP
+export StaticLQGNEP, ParametricLQGNEP, BilevelGame
 import CommonSolve: solve  # Override the `solve` exported by DAQP
 export solve
 

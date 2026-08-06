@@ -30,7 +30,7 @@ A_sh = [[1.;
 b_sh = [1.; 
         2.]
 
-gnep = DyNECT.StaticGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
+gnep = DyNECT.StaticLQGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
 
 # ============================================================================
 # Test 1: Parametric solution of GNE problem
@@ -105,11 +105,11 @@ for test in 1:50
     global all_optima_found
     # Selection function: find closest solution to x_des
     x_des = rand(2) .* [.5;2.0] # 0 <= x_des <= .5
-    ϕ(x) = sum(abs2, x - x_des) # |x-x_des|²
+    ϕ(γ, x) = sum(abs2, x - x_des) # |x-x_des|²
 
     # Select optimal GNE solution
-    opt_gnep = OptimalGNEP(gnep, ϕ)
-    result = CommonSolve.solve(opt_gnep, DyNECT.PWAConvexOptSolver)
+    bilevel_game = BilevelGame(ParametricLQGNEP(gnep), ϕ)
+    result = CommonSolve.solve(bilevel_game, DyNECT.PWAConvexOptSolver)
 
     # Expected solution: closest point to x_des on x₂ = min(1-x₁, 2-4x₁), x₁ ∈ [0, .5]
     proj1 = closest_point_on_segment(x_des, [0.0, 1.0], [1 / 3, 2 / 3])   # x2 = 1 - x1,   x1 ∈ [0, 1/3]

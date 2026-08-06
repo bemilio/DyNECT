@@ -1,85 +1,83 @@
 ####### Type conversion functions #####
 
 @doc raw"""
-    DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
-    Constructs the parametric variational inequality (mpVI) for a dynamic Nash equilibrium problem (DynLQGame) over a finite prediction horizon.
+    DynLQGame2ParametricLQGNEP(prob::DynLQGame, T_hor::Int64)
+
+Constructs the [`ParametricLQGNEP`](@ref) followers' game for a dynamic Nash equilibrium
+problem (`DynLQGame`) over a finite prediction horizon, with the initial state ``x_0`` as
+the external parameter ``\gamma``.
 
 # Arguments
 - `prob::DynLQGame`: Dynamic game structure containing system dynamics, cost, and constraints.
 - `T_hor::Int64`: Prediction horizon.
 
 # Returns
-- `MPVI`: An instance of `ParametricDAQP.MPVI` representing the parametric variational inequality:
-    - `H`: Block matrix for the quadratic part of the VI mapping.
-    - `F`: Matrix mapping the initial state to the affine part of the VI mapping.
-    - `f`: Constant affine vector in the VI mapping.
-    - `D`: Constraint matrix for the stacked input sequence.
-    - `E`: Matrix mapping the initial state to the affine part of the constraints.
-    - `d`: Constant affine vector in the constraints.
-
-The VI is of the form:  
-``H u + F x_0 + f``,  subject to  ``D u \leq E x_0 + d``
-where ``u`` is the stacked input sequence for all agents.
+- `ParametricLQGNEP`: the static GNEP over the stacked input sequence ``u``, parametrized by
+  ``\gamma = x_0``, equivalent to the [`mpAVI`](@ref) produced by [`DynLQGame2mpAVI`](@ref).
 """
-function DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
-    # Matrices defined as in Baghdalhorani, Benenati, Grammatico - Arxiv 2025
-
+function DynLQGame2ParametricLQGNEP(prob::DynLQGame, T_hor::Int64)
     # prediction model: x̅ = Θx₀+(∑ Γᵢu̅ᵢ) + c̅
     Γ, Γi, Θ, c̅ = generate_prediction_model(prob.A, prob.B, T_hor; c=prob.c)
 
-    # Define Q̅[i] = blkdg(I ⊗ Q[i], Pi)
+    # Define Q̅[i] = blkdg(Q[1][i],..., Q[T][i], P[i])
     Q̅ = [BlockDiagonal([kron(I(T_hor - 1), prob.Q[i]), prob.P[i]]) for i in 1:prob.N]
 
-    # Define R̅ as a block matrix where each block is R̅ᵢⱼ = I ⊗ Rᵢⱼ
-    R̅ = BlockArray{Float64}(undef_blocks, [T_hor * prob.nu[i] for i = 1:prob.N], [T_hor * prob.nu[i] for i = 1:prob.N])
+    Q_static = Matrix{Matrix{Float64}}(undef, prob.N, prob.N)
     for i in 1:prob.N
+        QiΓ = Γi[i]' * Q̅[i]
         for j in 1:prob.N
-            R̅[Block(i, j)] = kron(I(T_hor), prob.R[i][j])
+            Q_static[i, j] = Matrix{Float64}(QiΓ * Γi[j] + kron(I(T_hor), prob.R[i][j]))
         end
     end
+    Q = [[Q_static[i, j] for j in 1:prob.N] for i in 1:prob.N]
 
-    # Define H (linear part of the VI mapping)
-    H = BlockArray{Float64}(undef_blocks, [T_hor * prob.nu[i] for i = 1:prob.N], [T_hor * prob.nu[i] for i = 1:prob.N])
+    # Parametric affine influence of x0 on the objective (γ = x0)
+    Q_qγ = [Matrix{Float64}(Γi[i]' * Q̅[i] * Θ) for i in 1:prob.N]
+
+    # define f (affine, γ=0 part of the VI mapping)
+    q_static = Vector{Vector{Float64}}(undef, prob.N)
     for i in 1:prob.N
-        for j in 1:prob.N
-            H[Block(i, j)] = Γi[i]' * Q̅[i] * Γi[j]
-        end
+        q̅i = vcat(kron(ones(T_hor - 1), prob.q[i]), prob.p[i])
+        r̅i = kron(ones(T_hor), prob.r[i])
+        q_static[i] = Γi[i]' * (Q̅[i] * c̅ + q̅i) + r̅i
     end
-    H = H + R̅
-
-    # Define F (maps from x0 to the affine part of the VI mapping)
-    F = vcat([Γi[i]' * Q̅[i] * Θ for i in 1:prob.N]...)
-
-    # define f (affine part of the VI mapping)
-    q̅ = [vcat(kron(ones(T_hor - 1), prob.q[i]), prob.p[i]) for i in 1:prob.N]
-    r̅ = [kron(ones(T_hor), prob.r[i]) for i in 1:prob.N]
-    f = vcat([Γi[i]' * (Q̅[i] * c̅ + q̅[i]) + r̅[i] for i in 1:prob.N]...)
 
     ## Constraints
     # Cₓ*x[t] ≤ bₓ ∀ t ==> C̅ₓΓu̅ <= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅
     # where C̅ₓ = I ⊗ Cₓ
     C̅_x = kron(I(T_hor), prob.C_x)
-    # D_shar = row_stack([I ⊗ Du_i ; (I ⊗ Dx)*Γi ] )
-    D_shar = hcat([[kron(I(T_hor), prob.C_u_i[i]);
-        C̅_x * Γi[i]] for i in 1:prob.N]...)
-    # Append local constraints 
-    D = [D_shar;
-        BlockDiagonal([kron(I(T_hor), prob.C_loc_i[i]) for i = 1:prob.N])]
 
-    # Define E (maps from x0 to constraints)
-    E = [zeros(T_hor * prob.m_u, prob.nx)        # Shared input constraints
-        -1 * C̅_x * Θ;                            # State constraints
-        zeros(sum(prob.m_loc) * T_hor, prob.nx)] # Local input constraints
+    # Shared constraints (input + state), one column block per agent, same rows for all agents
+    A_sh = [Matrix{Float64}([kron(I(T_hor), prob.C_u_i[i]); C̅_x * Γi[i]]) for i in 1:prob.N]
+    b_sh = vcat(kron(ones(T_hor), prob.b_u), kron(ones(T_hor), prob.b_x) - C̅_x * c̅)
+    # Parametric affine influence of x0 on the shared constraints (γ = x0)
+    B_sh_γ = Matrix{Float64}([zeros(T_hor * prob.m_u, prob.nx); -1 * C̅_x * Θ])
 
-    # Affine part of the constraints
-    d = [kron(ones(T_hor), prob.b_u);            # Shared input constraints
-        kron(ones(T_hor), prob.b_x) - C̅_x * c̅    # State constraints
-        vcat([kron(ones(T_hor), prob.b_loc_i[i]) for i in 1:prob.N]...)] # Local input constraints
-    # VI(H*x + F*x0 + f, D*x <= E*x0 + d)
-    return mpAVI(Matrix{Float64}(H), F, f, D, E, d)
+    # Local constraints, per agent (independent of x0)
+    A_loc = [Matrix{Float64}(kron(I(T_hor), prob.C_loc_i[i])) for i in 1:prob.N]
+    b_loc = [kron(ones(T_hor), prob.b_loc_i[i]) for i in 1:prob.N]
+    B_loc_γ = [zeros(length(b_loc[i]), prob.nx) for i in 1:prob.N]
+
+    return ParametricLQGNEP(Q, q_static, A_loc, b_loc, A_sh, b_sh;
+        Q_qγ=Q_qγ, B_loc_γ=B_loc_γ, B_sh_γ=B_sh_γ)
 end
 
-function DynLQGame2mpAVI(prob::DynLQGameTV) # time varying
+@doc raw"""
+    DynLQGame2ParametricLQGNEP(prob::DynLQGameTV)
+
+Constructs the [`ParametricLQGNEP`](@ref) followers' game for a time-varying dynamic Nash
+equilibrium problem (`DynLQGameTV`) over its (fixed) prediction horizon `prob.Thor`, with
+the initial state ``x_0`` as the external parameter ``\gamma``.
+
+# Arguments
+- `prob::DynLQGameTV`: Time-varying dynamic game structure containing system dynamics, cost,
+  and constraints.
+
+# Returns
+- `ParametricLQGNEP`: the static GNEP over the stacked input sequence ``u``, parametrized by
+  ``\gamma = x_0``, equivalent to the [`mpAVI`](@ref) produced by [`DynLQGame2mpAVI`](@ref).
+"""
+function DynLQGame2ParametricLQGNEP(prob::DynLQGameTV)
     # prediction model: x̅ = Θx₀+(∑ Γᵢu̅ᵢ) + c̅
     Γ, Γi, Θ, c̅ = generate_prediction_model(prob.A, prob.B, prob.Thor; c=prob.c)
 
@@ -89,59 +87,90 @@ function DynLQGame2mpAVI(prob::DynLQGameTV) # time varying
         for i in 1:prob.N
     ]
 
-    # Define R̅ as a block matrix where each block is R̅ᵢⱼ = blkdg(R[1][i][j],..., R[T][i][j])
-    R̅ = BlockArray{Float64}(undef_blocks, [prob.Thor * prob.nu[i] for i = 1:prob.N], [prob.Thor * prob.nu[i] for i = 1:prob.N])
+    Q_static = Matrix{Matrix{Float64}}(undef, prob.N, prob.N)
     for i in 1:prob.N
+        QiΓ = Γi[i]' * Q̅[i]
         for j in 1:prob.N
-            R̅[Block(i, j)] = BlockDiagonal([prob.R[t][i][j] for t=1:prob.Thor])
+            Q_static[i, j] = Matrix{Float64}(QiΓ * Γi[j] + BlockDiagonal([prob.R[t][i][j] for t = 1:prob.Thor]))
         end
     end
+    Q = [[Q_static[i, j] for j in 1:prob.N] for i in 1:prob.N]
 
-    # Define H (linear part of the VI mapping)
-    H = BlockArray{Float64}(undef_blocks, [prob.Thor * prob.nu[i] for i = 1:prob.N], [prob.Thor * prob.nu[i] for i = 1:prob.N])
+    # Parametric affine influence of x0 on the objective (γ = x0)
+    Q_qγ = [Matrix{Float64}(Γi[i]' * Q̅[i] * Θ) for i in 1:prob.N]
+
+    # define f (affine, γ=0 part of the VI mapping)
+    q_static = Vector{Vector{Float64}}(undef, prob.N)
     for i in 1:prob.N
-        for j in 1:prob.N
-            H[Block(i, j)] = Γi[i]' * Q̅[i] * Γi[j]
-        end
+        q̅i = vcat([prob.q[t][i] for t in 1:prob.Thor-1]..., prob.p[i])
+        r̅i = vcat([prob.r[t][i] for t in 1:prob.Thor]...)
+        q_static[i] = Γi[i]' * (Q̅[i] * c̅ + q̅i) + r̅i
     end
-    H = H + R̅
-
-    # Define F (maps from x0 to the affine part of the VI mapping)
-    F = vcat([Γi[i]' * Q̅[i] * Θ for i in 1:prob.N]...)
-
-    # define f (affine part of the VI mapping)
-    q̅ = [vcat([prob.q[t][i] for t in 1:prob.Thor-1]..., prob.p[i]) for i in 1:prob.N]
-    r̅ = [vcat([prob.r[t][i] for t in 1:prob.Thor]...) for i in 1:prob.N]
-    f = vcat([Γi[i]' * (Q̅[i] * c̅ + q̅[i]) + r̅[i] for i in 1:prob.N]...)
 
     ## Constraints
     # Cᵗₓ*x[t] ≤ bᵗₓ ∀ t ==> C̅ₓΓu̅ <= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅
     # where C̅ₓ = blkdiag(C¹ₓ, ...,Cᵗₓ)
     C̅_x = BlockDiagonal(prob.C_x)
-    # Collect both shared input constraints and state constraints:
-    # D_shar = row_stack ([I ⊗ Cu[i]; 
-    #                     (I ⊗ C̅ₓ)*Γ[i] ] )
-    D_shar = hcat([[BlockDiagonal([prob.C_u[t][i] for t in 1:prob.Thor]);
-        C̅_x * Γi[i]] for i in 1:prob.N]...)
-    # Append local constraints 
-    D = [D_shar;
-        BlockDiagonal([ BlockDiagonal([prob.C_loc[t][i] for t in 1:prob.Thor] ) for i = 1:prob.N])]
 
-    # Define E (maps from x0 to constraints)
-    E = [zeros(prob.Thor * prob.m_u, prob.nx)        # Shared input constraints
-        -1 * C̅_x * Θ;                            # State constraints
-        zeros(sum(prob.m_loc) * prob.Thor, prob.nx)] # Local input constraints
+    # Shared constraints (input + state), one column block per agent, same rows for all agents
+    A_sh = [Matrix{Float64}([BlockDiagonal([prob.C_u[t][i] for t in 1:prob.Thor]); C̅_x * Γi[i]]) for i in 1:prob.N]
+    b_sh = vcat(vcat(prob.b_u...), vcat(prob.b_x...) - C̅_x * c̅)
+    # Parametric affine influence of x0 on the shared constraints (γ = x0)
+    B_sh_γ = Matrix{Float64}([zeros(prob.Thor * prob.m_u, prob.nx); -1 * C̅_x * Θ])
 
-    # Affine part of the constraints
-    d = [vcat(prob.b_u...);            # Shared input constraints
-        vcat(prob.b_x...) - C̅_x * c̅    # State constraints
-        vcat([vcat([prob.b_loc[t][i] for t in 1:prob.Thor]...) for i in 1:prob.N]...)] # Local input constraints
-    # VI(H*x + F*x0 + f, D*x <= E*x0 + d)
-    return mpAVI(Matrix{Float64}(H), F, f, D, E, d)
+    # Local constraints, per agent (independent of x0)
+    A_loc = [Matrix{Float64}(BlockDiagonal([prob.C_loc[t][i] for t in 1:prob.Thor])) for i in 1:prob.N]
+    b_loc = [vcat([prob.b_loc[t][i] for t in 1:prob.Thor]...) for i in 1:prob.N]
+    B_loc_γ = [zeros(length(b_loc[i]), prob.nx) for i in 1:prob.N]
+
+    return ParametricLQGNEP(Q, q_static, A_loc, b_loc, A_sh, b_sh;
+        Q_qγ=Q_qγ, B_loc_γ=B_loc_γ, B_sh_γ=B_sh_γ)
 end
 
 @doc raw"""
-    StaticGNE2mpAVI(game::StaticGNEP)
+    DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
+
+Constructs the parametric variational inequality ([`mpAVI`](@ref)) for a dynamic Nash
+equilibrium problem (`DynLQGame`) over a finite prediction horizon, by building the
+equivalent [`ParametricLQGNEP`](@ref) via [`DynLQGame2ParametricLQGNEP`](@ref) and
+converting it with `mpAVI(::ParametricLQGNEP)`.
+
+# Arguments
+- `prob::DynLQGame`: Dynamic game structure containing system dynamics, cost, and constraints.
+- `T_hor::Int64`: Prediction horizon.
+
+# Returns
+- `mpAVI`: the parametric variational inequality
+  ``\mathrm{VI}(Hu + Fx_0 + f,\ Au \leq Bx_0 + b)``, where ``u`` is the stacked input
+  sequence for all agents and ``x_0`` is the initial state.
+"""
+function DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
+    return mpAVI(DynLQGame2ParametricLQGNEP(prob, T_hor))
+end
+
+@doc raw"""
+    DynLQGame2mpAVI(prob::DynLQGameTV)
+
+Constructs the parametric variational inequality ([`mpAVI`](@ref)) for a time-varying
+dynamic Nash equilibrium problem (`DynLQGameTV`) over its (fixed) prediction horizon
+`prob.Thor`, by building the equivalent [`ParametricLQGNEP`](@ref) via
+[`DynLQGame2ParametricLQGNEP`](@ref) and converting it with `mpAVI(::ParametricLQGNEP)`.
+
+# Arguments
+- `prob::DynLQGameTV`: Time-varying dynamic game structure containing system dynamics, cost,
+  and constraints.
+
+# Returns
+- `mpAVI`: the parametric variational inequality
+  ``\mathrm{VI}(Hu + Fx_0 + f,\ Au \leq Bx_0 + b)``, where ``u`` is the stacked input
+  sequence for all agents and ``x_0`` is the initial state.
+"""
+function DynLQGame2mpAVI(prob::DynLQGameTV)
+    return mpAVI(DynLQGame2ParametricLQGNEP(prob))
+end
+
+@doc raw"""
+    StaticGNE2mpAVI(game::StaticLQGNEP)
  
 Assemble static GNE game into multi-parametric variational inequality (mpAVI).
  
@@ -151,7 +180,7 @@ The Nabetani-Tseng-Fukushima reparametrization transforms shared constraints int
  
 Returns: ``\text{VI}(H x + f, A x \leq B \theta + b)`` where ``\theta \in [\text{lb}, \text{ub}]``
 """
-function NabetaniParametrization(game::StaticGNEP; θub::Union{Vector{Float64},Nothing}=nothing, θlb::Union{Vector{Float64},Nothing}=nothing)
+function NabetaniParametrization(game::StaticLQGNEP; θub::Union{Vector{Float64},Nothing}=nothing, θlb::Union{Vector{Float64},Nothing}=nothing)
     # Infer dimensions
     N = game.N
     n = game.n
@@ -215,7 +244,7 @@ end
 ####### END Type conversion functions #######
 
 ####### Helper functions for optimal GNE selection ##########
-function filter_gne_crs!(sol::ParametricDAQP.Solution, game::StaticGNEP)
+function filter_gne_crs!(sol::ParametricDAQP.Solution, game::StaticLQGNEP)
     N = game.N
     m_sh = length(game.b_sh)
     n_local = sum(size(game.A_loc[i], 1) for i in 1:N)
@@ -570,4 +599,135 @@ function block_hessian(f, x...)
         j in eachindex(x)
     )
     return H, blocks
+end
+
+
+@doc raw"""
+    LQapprox(game, u, x0, T_hor, γ=nothing)
+
+Linearize the dynamics and quadratize the objectives of `game` (a [`DynGame`](@ref))
+along the horizon `T_hor`, around the input sequence `u` and initial state `x0`,
+returning the resulting [`DynLQGameTV`](@ref) time-varying LQ game.
+
+# Arguments
+- `game::DynGame`: the (possibly nonlinear) dynamic game to approximate.
+- `u::AbstractVector{<:AbstractVector{<:AbstractVector}}`: input sequence to linearize
+  around; `u[t][i]` is the input of agent `i` at time `t`.
+- `x0::AbstractVector`: initial state.
+- `T_hor::Int64`: horizon length.
+- `γ::Union{Nothing,AbstractVector{<:AbstractVector}}=nothing`: exogenous, possibly
+  time-varying parameter passed to `game.f`, `game.J`, `game.gx`, `game.gu` and
+  `game.gloc` at every timestep, with `γ[t]` the parameter at time `t` (e.g. a reference
+  trajectory or an external disturbance). If `nothing` (the default), `game`'s functions
+  are called without a trailing `γ` argument, so existing games are unaffected. If a
+  `γ` is passed, `game`'s functions must all accept the trailing `γ` argument. See
+  [`DynGame`](@ref).
+"""
+function LQapprox(game::DynGame,
+    u::AbstractVector{<:AbstractVector{<:AbstractVector}},
+    x0::AbstractVector,
+    T_hor::Int64, # Could possibly be inferred as length of u
+    γ::Union{Nothing,AbstractVector{<:AbstractVector}}=nothing # Parameters / exhogenous inputs for J, f, gx, gu
+    )
+
+    xt = copy(x0)
+    has_param = γ !== nothing # If false, game's functions are not called with a trailing γ argument
+
+    A =  [Matrix{Float64}(undef, game.nx, game.nx) for _ in 1:T_hor]
+    B = [[Matrix{Float64}(undef, game.nx, nui) for nui in game.nu] for _ in 1:T_hor]
+    Cx = [Matrix{Float64}(undef, game.mx, game.nx) for _ in 1:T_hor]
+    bx = [Vector{Float64}(undef, game.mx) for _ in 1:T_hor]
+    Cu = [[Matrix{Float64}(undef, game.mu, nui) for nui in game.nu] for _ in 1:T_hor]
+    bu = [Vector{Float64}(undef, game.mu) for _ in 1:T_hor]
+    Cloc = [[Matrix{Float64}(undef, game.mloc[i], game.nu[i]) for i in 1:game.N] for _ in 1:T_hor]
+    bloc = [[Vector{Float64}(undef, mi) for mi in game.mloc] for _ in 1:T_hor]
+    Q = [[Matrix{Float64}(undef, game.nx, game.nx) for i in 1:game.N] for _ in 1:T_hor-1]
+    R = [[[Matrix{Float64}(undef, game.nu[i], game.nu[j]) for j in 1:game.N] for i in 1:game.N] for _ in 1:T_hor]
+    q = [[Vector{Float64}(undef, game.nx) for _ in 1:game.N] for _ in 1:T_hor-1]
+    r = [[Vector{Float64}(undef, game.nu[i]) for i in 1:game.N] for _ in 1:T_hor]
+
+
+    for t=1:T_hor
+        γt = has_param ? (γ[t],) : () # Trailing γ argument, empty tuple if game has no parameter
+
+        # Linearize dynamics
+        Jac_f_t = Zygote.jacobian(game.f, xt, u[t]..., γt...)
+        A[t] .= Jac_f_t[1]
+        B[t] .= Jac_f_t[2:game.N+1]
+
+        # Linearize state constraints
+        Cx[t] .= Zygote.jacobian(game.gx, xt, γt...)[1]
+        bx[t] .= -game.gx(xt, γt...)
+
+        # Linearize input constraints
+        Cu[t] .= Zygote.jacobian(game.gu, u[t]..., γt...)[1:game.N]
+        bu[t] .= -game.gu(u[t]..., γt...)
+
+        # Linearize local input constraints
+
+        Cloc[t] .= [Zygote.jacobian(game.gloc[i], u[t][i], γt...)[1] for i in 1:game.N]
+        bloc[t] .= -[game.gloc[i](u[t][i], γt...) for i in 1:game.N]
+
+        # Quadratize objectives
+        for i=1:game.N
+            H, Hij = block_hessian(game.J[i], xt, u[t]..., γt...)
+            # t>=2 && println("size of Qti = $(Q[t-1][i])")
+            if t>=2
+                Q[t-1][i] .= Hij[(1,1)]
+            end
+            R[t][i] .= [Hij[(1+i, 1+j)] for j in 1:game.N] # Hessian with respect to ui, uj
+
+            grad_Ji = Zygote.gradient(game.J[i], xt, u[t]..., γt...)
+            if t>=2
+                q[t-1][i] .= grad_Ji[1]
+            end
+            r[t][i] = grad_Ji[i+1]
+        end
+
+        # # Propagate dynamics
+        xt = game.f(xt, u[t]..., γt...)
+    end
+
+    LQgame = DynLQGameTV(
+        A=A,
+        B=B,
+        Q=Q,
+        R=R,
+        q=q,
+        r=r,
+        C_x=Cx,
+        b_x=bx,
+        C_loc=Cloc,
+        b_loc=bloc,
+        C_u=Cu,
+        b_u=bu
+    )     
+    return LQgame
+end
+
+function LQ_bilevel_approx(game::DynGame,
+    u::AbstractVector{<:AbstractVector{<:AbstractVector}},
+    x0::AbstractVector,
+    T_hor::Int64, # Could possibly be inferred as length of u
+    γ::Union{Nothing,AbstractVector{<:AbstractVector}}=nothing; # Parameters / exhogenous inputs for J, f, gx, gu,
+    leader::Int64=1
+    )
+    _, H_block = block_hessian(game.J[leader], xt, u[t]..., γt...)
+    Qx = H_block[(1,1)]
+    if t>=2
+        Ql[t-1] .= Hlj[(1,1)]
+    end
+    R[t][i] .= [Hij[(1+i, 1+j)] for j in 1:game.N] # Hessian with respect to ui, uj
+
+    grad_Ji = Zygote.gradient(game.J[i], xt, u[t]..., γt...)
+    if t>=2
+        q[t-1][i] .= grad_Ji[1]
+    end
+    r[t][i] = grad_Ji[i+1]
+
+    # # Propagate dynamics
+    xt = game.f(xt, u[t]..., γt...)
+    # Quadratic approximation of leader objective
+
+    Q0
 end

@@ -5,6 +5,8 @@ using ParametricDAQP
 using BlockArrays
 using MatrixEquations
 using CommonSolve
+using JuMP
+using Clarabel
 
 
 
@@ -44,30 +46,35 @@ end
     @test norm(Γi[j][end-nx+1:end, 1:nu[j]] - A^(T_hor - 1) * B[j]) < tol
 end
 
-@testset "DynLQGame2mpAVI.jl" begin
+@testset "DynLQGame2mpAVI_NashEquilibrium.jl" begin
     using Random
     Random.seed!(1)
 
     nx = 3
     N = 3
     nu = [2, 3, 4]
-    T_hor = 4
+    T_hor = 3
 
     A = rand(nx, nx)
     B = [rand(nx, nu[j]) for j in 1:N]
 
-    Q = [rand(nx, nx) for _ in 1:N]
-    P = [rand(nx, nx) for _ in 1:N]
+    # Symmetric PSD state cost, as in infinite_horizon_OLNE.jl, so that both the
+    # AVI (monotone operator) and the per-agent OCPs (convex QPs) below are well-posed.
+    Q = Vector{Matrix{Float64}}(undef, N)
+    for i = 1:N
+        Q[i] = 0.1 * rand(nx, nx) + Matrix{Float64}(I(nx))
+        Q[i] = Q[i] + Q[i]'
+    end
     # Define R_i with only non-zero element (i,i)
     R = [[zeros(nu[i], nu[j]) for j in 1:N] for i in 1:N]
     for i in 1:N
-        R[i][i] .= 100.0 * I(nu[i])
+        R[i][i] .= Matrix{Float64}(1.0 * I(nu[i]))
     end
 
-    # Constraints
-    mx = 2
-    C_x = rand(mx, nx)
-    b_x = rand(mx)
+    # No state constraints: with a random x0, the state trajectory is not directly
+    # controllable to a feasible halfspace, so avoid the risk of an infeasible AVI.
+    C_x = zeros(0, nx)
+    b_x = zeros(0)
 
     mloc = [1, 2, 1]
     C_loc_vec = [rand(mloc[i], nu[i]) for i in 1:N]
@@ -77,12 +84,21 @@ end
     C_u_vec = [rand(mu, nu[i]) for i in 1:N]
     b_u = rand(mu)
 
+    # Affine part of the objective: without it, the running/terminal costs are purely
+    # quadratic in x, u and the equilibrium tends to sit at (or very near) the origin,
+    # which is too degenerate a solution to meaningfully exercise the comparison below.
+    q = [randn(nx) for _ in 1:N]
+    r = [randn(nu[i]) for i in 1:N]
+    p = [randn(nx) for _ in 1:N]
+
     prob = DynLQGame(
         A=A,
         B=B,
         Q=Q,
         R=R,
-        P=P,
+        q=q,
+        r=r,
+        p=p,
         C_x=C_x,
         b_x=b_x,
         C_loc_vec=C_loc_vec,
@@ -90,8 +106,63 @@ end
         C_u_vec=C_u_vec,
         b_u=b_u)
 
-    mpVI = DynLQGame2mpAVI(prob, T_hor)
+    x0 = randn(nx)
 
+    # Convert the dynamic game to an AVI (exactly as in DynLQGame2mpAVI.jl) and solve it.
+    mpVI = DynLQGame2mpAVI(prob, T_hor)
+    avi = DyNECT.AVI(mpVI, x0)
+    params = DyNECT.IterativeSolverParams(warmstart=:UnconstrainedSolution)
+    solution = CommonSolve.solve(avi, DyNECT.DouglasRachford; params=params)
+    @test solution.status == :Solved
+
+    # Split the stacked AVI solution u = [ū_1; ...; ū_N], ū_i = [u_i[0]; ...; u_i[T_hor-1]]
+    # into per-agent, per-time input sequences.
+    offsets = cumsum([0; prob.nu .* T_hor])
+    u_seq = [[solution.x[offsets[i]+(t-1)*prob.nu[i]+1:offsets[i]+t*prob.nu[i]] for t in 1:T_hor] for i in 1:N]
+
+    # For each agent i, independently formulate the optimal control problem obtained by
+    # fixing all other agents' inputs to their AVI solution, with the dynamics as an
+    # explicit linear equality constraint, and verify that u_seq[i] solves it: i.e. the
+    # AVI solution is a Nash equilibrium.
+    tol = 1e-5
+    for i in 1:N
+        model = Model(Clarabel.Optimizer)
+        set_silent(model)
+        @variable(model, x[1:nx, 1:T_hor])
+        @variable(model, u[1:prob.nu[i], 1:T_hor])
+
+        for t in 1:T_hor
+            x_prev = t == 1 ? x0 : x[:, t-1]
+            other_input = sum(prob.B[j] * u_seq[j][t] for j in 1:N if j != i)
+            @constraint(model, x[:, t] .== prob.A * x_prev + prob.B[i] * u[:, t] + other_input + prob.c)
+        end
+
+        for t in 1:T_hor
+            @constraint(model, prob.C_loc_i[i] * u[:, t] .<= prob.b_loc_i[i])
+            @constraint(model, prob.C_u_i[i] * u[:, t] + sum(prob.C_u_i[j] * u_seq[j][t] for j in 1:N if j != i) .<= prob.b_u)
+        end
+
+        cost = 0.5 * x[:, T_hor]' * prob.P[i] * x[:, T_hor] + prob.p[i]' * x[:, T_hor]
+        for t in 1:T_hor-1
+            cost += 0.5 * x[:, t]' * prob.Q[i] * x[:, t] + prob.q[i]' * x[:, t]
+        end
+        for t in 1:T_hor
+            cost += 0.5 * u[:, t]' * prob.R[i][i] * u[:, t] + prob.r[i]' * u[:, t]
+            for j in 1:N
+                if j != i
+                    cost += u[:, t]' * prob.R[i][j] * u_seq[j][t]
+                end
+            end
+        end
+        @objective(model, Min, cost)
+
+        optimize!(model)
+        @test is_solved_and_feasible(model)
+
+        u_ocp = value.(u)
+        err = maximum(norm(u_ocp[:, t] - u_seq[i][t]) for t in 1:T_hor)
+        @test err < tol
+    end
 end
 
 @testset "infinite_horizon_OLNE.jl" begin
@@ -167,9 +238,9 @@ end
     @test norm(u_inf - u) < 1e-5
 end
 
-@testset "StaticGNEP" begin
+@testset "StaticLQGNEP" begin
     # Scalar Rosen example using Nabetani reformulation + mpAVI solver
-    gnep = DyNECT.StaticGNEP(
+    gnep = DyNECT.StaticLQGNEP(
         Q = [[[1.;;], [-1.;;]], 
              [[1.;;], [2.;;]]],
         q = [[0.], [0.]],
@@ -220,7 +291,7 @@ end
     b_sh = [1.; 
             2.]
 
-    gnep = DyNECT.StaticGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
+    gnep = DyNECT.StaticLQGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
 
     # restrict parameter space for reparametrization
     θub =  [5.0; 5.0]
@@ -253,9 +324,9 @@ end
     all_optima_found = true
     for test in 1:1000
         x_des = rand(2) * .5
-        ϕ(x) = sum(abs2, x - x_des) # |x-x_des|²
-        opt_gnep = OptimalGNEP(gnep, ϕ)
-        result = CommonSolve.solve(opt_gnep, DyNECT.PWAConvexOptSolver; verbose = 0)
+        ϕ(γ, x) = sum(abs2, x - x_des) # |x-x_des|²
+        bilevel_game = BilevelGame(ParametricLQGNEP(gnep), ϕ)
+        result = CommonSolve.solve(bilevel_game, DyNECT.PWAConvexOptSolver; verbose = 0)
 
         proj1 = closest_point_on_segment(x_des, [0.0, 1.0], [1 / 3, 2 / 3])   # x2 = 1 - x1,  x1 ∈ [0, 1/3]
         proj2 = closest_point_on_segment(x_des, [1 / 3, 2 / 3], [0.5, 0.0])  # x2 = 2 - 4x1, x1 ∈ [1/3, .5]
