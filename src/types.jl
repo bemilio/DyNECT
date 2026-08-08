@@ -424,9 +424,9 @@ struct DynLQGameTV # Dynamic time-Variant Nash equilibrium problem
 end
 
 @doc raw"""
-    StaticLQGNEP
+    LQGNEP
 
-Static linear-quadratic generalized Nash equilibrium problem (GNEP). Agent ``i``'s decision
+Linear-quadratic generalized Nash equilibrium problem (GNEP). Agent ``i``'s decision
 ``x_i \in \mathbb{R}^{n_i}`` solves
 ```math
 \min_{x_i} \quad \frac{1}{2}x_i^\top Q_{ii} x_i + \sum_{j\neq i} x_i^\top Q_{ij} x_j + q_i^\top x_i \\
@@ -435,8 +435,25 @@ Static linear-quadratic generalized Nash equilibrium problem (GNEP). Agent ``i``
 ```
 i.e. each agent has its own quadratic objective (coupled to the others through the
 off-diagonal blocks of `Q`) and its own local constraints, and all agents share a common
-set of shared/coupling constraints. See [`ParametricLQGNEP`](@ref) for a version of this
-game whose data depends affinely on an external parameter.
+set of shared/coupling constraints.
+
+Optionally, the game's data can depend affinely on an external parameter
+``\gamma \in \mathbb{R}^{n_\gamma}``:
+```math
+q_i(\gamma) = q_i + Q_{q_i\gamma}\gamma, \qquad
+b_{\mathrm{loc},i}(\gamma) = b_{\mathrm{loc},i} + B_{\mathrm{loc},i,\gamma}\gamma, \qquad
+b_\mathrm{sh}(\gamma) = b_\mathrm{sh} + B_{\mathrm{sh},\gamma}\gamma.
+```
+The fields above (`N`, `n`, `Q`, `q`, `A_loc`, `b_loc`, `A_sh`, `b_sh`) hold the nominal
+(``\gamma=0``) game data. Setting `n_γ = 0` (the default, obtained by omitting `Q_qγ`,
+`B_loc_γ` and `B_sh_γ` in the constructor) removes the ``\gamma``-dependence entirely, giving
+a plain (non-parametric) GNEP. ``\gamma`` is an external parameter, not one of the agents'
+decision variables: a parametric `LQGNEP` is meant to be used as the followers' game in a
+[`BilevelGame`](@ref), whose leader chooses ``\gamma``.
+
+As in [`mpAVI`](@ref), ``\gamma`` is restricted to a set ``\{C\gamma \leq d\} \cap \{lb \leq \gamma \leq ub\}``.
+The box bounds `ub`, `lb` default to ``\pm 100`` per component, and the polytope `C`, `d` default to
+empty (no polytope constraints) when not given explicitly.
 
 # Fields
 - `N::Int`: number of agents.
@@ -448,8 +465,15 @@ game whose data depends affinely on an external parameter.
 - `b_loc::Vector{Vector{Float64}}`: local constraint bounds, `b_loc[i]` has length `m_loc[i]`.
 - `A_sh::Vector{Matrix{Float64}}`: shared constraint matrices, `A_sh[i]` has size `m_sh × n[i]`.
 - `b_sh::Vector{Float64}`: shared constraint bounds, length `m_sh`.
+- `n_γ::Int`: number of external parameters ``\gamma`` (`0` if there is no ``\gamma``-dependence).
+- `Q_qγ::Vector{Matrix{Float64}}`: sensitivity of `q[i]` to ``\gamma``, size `n[i] × n_γ`.
+- `B_loc_γ::Vector{Matrix{Float64}}`: sensitivity of `b_loc[i]` to ``\gamma``, size `m_loc[i] × n_γ`.
+- `B_sh_γ::Matrix{Float64}`: sensitivity of `b_sh` to ``\gamma``, size `m_sh × n_γ`.
+- `ub::Vector{Float64}`, `lb::Vector{Float64}`: box bounds on ``\gamma``, length `n_γ`. Default to ±100.
+- `C::Matrix{Float64}`, `d::Vector{Float64}`: polytope constraint on ``\gamma``, `C\gamma \leq d`.
+  `C` has size `m_γ × n_γ`, `d` has length `m_γ`. Default to no constraints (`m_γ = 0`).
 """
-struct StaticLQGNEP #
+struct LQGNEP
     N::Int
     n::Vector{Int}
     Q::Vector{Vector{Matrix{Float64}}}
@@ -458,14 +482,29 @@ struct StaticLQGNEP #
     b_loc::Vector{Vector{Float64}}
     A_sh::Vector{Matrix{Float64}}
     b_sh::Vector{Float64}
+    n_γ::Int
+    Q_qγ::Vector{Matrix{Float64}}
+    B_loc_γ::Vector{Matrix{Float64}}
+    B_sh_γ::Matrix{Float64}
+    ub::Vector{Float64}
+    lb::Vector{Float64}
+    C::Matrix{Float64}
+    d::Vector{Float64}
 
-    function StaticLQGNEP(
+    function LQGNEP(
         Q::Vector{Vector{Matrix{Float64}}},
         q::AbstractVector,
         A_loc::AbstractVector,
         b_loc::AbstractVector,
         A_sh::AbstractVector,
-        b_sh::AbstractVector{<:Real}
+        b_sh::AbstractVector{<:Real};
+        Q_qγ::Union{AbstractVector,Nothing}=nothing,
+        B_loc_γ::Union{AbstractVector,Nothing}=nothing,
+        B_sh_γ::Union{AbstractMatrix,Nothing}=nothing,
+        ub::Union{AbstractVector,Nothing}=nothing,
+        lb::Union{AbstractVector,Nothing}=nothing,
+        C::Union{AbstractMatrix,Nothing}=nothing,
+        d::Union{AbstractVector,Nothing}=nothing,
     )
         # Infer number of agents
         N = length(Q)
@@ -502,88 +541,6 @@ struct StaticLQGNEP #
 
         @assert length(b_sh) == m_sh "b_sh must have m_sh=$m_sh elements, got $(length(b_sh))"
 
-        return new(N, n, Q, q, A_loc, b_loc, A_sh, b_sh)
-    end
-
-    function StaticLQGNEP(; Q, q, A_loc, b_loc, A_sh, b_sh)
-        StaticLQGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
-    end
-end #
-
-@doc raw"""
-    ParametricLQGNEP
-
-Wraps a [`StaticLQGNEP`](@ref) whose data depends affinely on an external parameter
-``\gamma \in \mathbb{R}^{n_\gamma}``:
-```math
-q_i(\gamma) = q_i + Q_{q_i\gamma}\gamma, \qquad
-b_{\mathrm{loc},i}(\gamma) = b_{\mathrm{loc},i} + B_{\mathrm{loc},i,\gamma}\gamma, \qquad
-b_\mathrm{sh}(\gamma) = b_\mathrm{sh} + B_{\mathrm{sh},\gamma}\gamma.
-```
-`game` holds the nominal (``\gamma=0``) [`StaticLQGNEP`](@ref). Setting `n_γ = 0` (the default,
-obtained by omitting `Q_qγ`, `B_loc_γ` and `B_sh_γ` in the constructor) removes the
-``\gamma``-dependence entirely. ``\gamma`` is an external parameter, not one of the agents'
-decision variables: `ParametricLQGNEP` is meant to be used as the followers' game in a
-[`BilevelGame`](@ref), whose leader chooses ``\gamma``.
-
-As in [`mpAVI`](@ref), ``\gamma`` is restricted to a set ``\{C\gamma \leq d\} \cap \{lb \leq \gamma \leq ub\}``.
-The box bounds `ub`, `lb` default to ``\pm 100`` per component, and the polytope `C`, `d` default to
-empty (no polytope constraints) when not given explicitly.
-
-# Fields
-- `game::StaticLQGNEP`: nominal (``\gamma=0``) followers' game.
-- `n_γ::Int`: number of external parameters ``\gamma`` (`0` if there is no ``\gamma``-dependence).
-- `Q_qγ::Vector{Matrix{Float64}}`: sensitivity of `game.q[i]` to ``\gamma``, size `n[i] × n_γ`.
-- `B_loc_γ::Vector{Matrix{Float64}}`: sensitivity of `game.b_loc[i]` to ``\gamma``, size `m_loc[i] × n_γ`.
-- `B_sh_γ::Matrix{Float64}`: sensitivity of `game.b_sh` to ``\gamma``, size `m_sh × n_γ`.
-- `ub::Vector{Float64}`, `lb::Vector{Float64}`: box bounds on ``\gamma``, length `n_γ`. Default to ±100.
-- `C::Matrix{Float64}`, `d::Vector{Float64}`: polytope constraint on ``\gamma``, `C\gamma \leq d`.
-  `C` has size `m_γ × n_γ`, `d` has length `m_γ`. Default to no constraints (`m_γ = 0`).
-"""
-struct ParametricLQGNEP
-    game::StaticLQGNEP
-    n_γ::Int
-    Q_qγ::Vector{Matrix{Float64}}
-    B_loc_γ::Vector{Matrix{Float64}}
-    B_sh_γ::Matrix{Float64}
-    ub::Vector{Float64}
-    lb::Vector{Float64}
-    C::Matrix{Float64}
-    d::Vector{Float64}
-
-    function ParametricLQGNEP(
-        Q::Vector{Vector{Matrix{Float64}}},
-        q::AbstractVector,
-        A_loc::AbstractVector,
-        b_loc::AbstractVector,
-        A_sh::AbstractVector,
-        b_sh::AbstractVector{<:Real};
-        Q_qγ::Union{AbstractVector,Nothing}=nothing,
-        B_loc_γ::Union{AbstractVector,Nothing}=nothing,
-        B_sh_γ::Union{AbstractMatrix,Nothing}=nothing,
-        ub::Union{AbstractVector,Nothing}=nothing,
-        lb::Union{AbstractVector,Nothing}=nothing,
-        C::Union{AbstractMatrix,Nothing}=nothing,
-        d::Union{AbstractVector,Nothing}=nothing,
-    )
-        game = StaticLQGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
-        return ParametricLQGNEP(game; Q_qγ=Q_qγ, B_loc_γ=B_loc_γ, B_sh_γ=B_sh_γ, ub=ub, lb=lb, C=C, d=d)
-    end
-
-    function ParametricLQGNEP(
-        game::StaticLQGNEP;
-        Q_qγ::Union{AbstractVector,Nothing}=nothing,
-        B_loc_γ::Union{AbstractVector,Nothing}=nothing,
-        B_sh_γ::Union{AbstractMatrix,Nothing}=nothing,
-        ub::Union{AbstractVector,Nothing}=nothing,
-        lb::Union{AbstractVector,Nothing}=nothing,
-        C::Union{AbstractMatrix,Nothing}=nothing,
-        d::Union{AbstractVector,Nothing}=nothing,
-    )
-        N = game.N
-        n = game.n
-        m_sh = length(game.b_sh)
-
         # Infer n_γ from whichever γ-sensitivity argument is given (0 if none are given)
         n_γ = 0
         if !isnothing(Q_qγ) && !isempty(Q_qγ)
@@ -595,39 +552,44 @@ struct ParametricLQGNEP
         end
 
         Q_qγ = isnothing(Q_qγ) ? [zeros(n[i], n_γ) for i in 1:N] : Matrix{Float64}.(Q_qγ)
-        B_loc_γ = isnothing(B_loc_γ) ? [zeros(length(game.b_loc[i]), n_γ) for i in 1:N] : Matrix{Float64}.(B_loc_γ)
+        B_loc_γ = isnothing(B_loc_γ) ? [zeros(length(b_loc[i]), n_γ) for i in 1:N] : Matrix{Float64}.(B_loc_γ)
         B_sh_γ = isnothing(B_sh_γ) ? zeros(m_sh, n_γ) : Matrix{Float64}(B_sh_γ)
         ub = isnothing(ub) ? 100 .* ones(n_γ) : Vector{Float64}(ub)
         lb = isnothing(lb) ? -100 .* ones(n_γ) : Vector{Float64}(lb)
         C = isnothing(C) ? zeros(0, n_γ) : Matrix{Float64}(C)
         d = isnothing(d) ? zeros(0) : Vector{Float64}(d)
 
-        @assert length(Q_qγ) == N "[ParametricLQGNEP constructor] Q_qγ must have one matrix per agent"
+        @assert length(Q_qγ) == N "[LQGNEP constructor] Q_qγ must have one matrix per agent"
         for i in 1:N
-            @assert size(Q_qγ[i]) == (n[i], n_γ) "[ParametricLQGNEP constructor] Q_qγ[$i] must be n[$i] × n_γ = $(n[i]) × $n_γ, got $(size(Q_qγ[i]))"
+            @assert size(Q_qγ[i]) == (n[i], n_γ) "[LQGNEP constructor] Q_qγ[$i] must be n[$i] × n_γ = $(n[i]) × $n_γ, got $(size(Q_qγ[i]))"
         end
-        @assert length(B_loc_γ) == N "[ParametricLQGNEP constructor] B_loc_γ must have one matrix per agent"
+        @assert length(B_loc_γ) == N "[LQGNEP constructor] B_loc_γ must have one matrix per agent"
         for i in 1:N
-            @assert size(B_loc_γ[i]) == (length(game.b_loc[i]), n_γ) "[ParametricLQGNEP constructor] B_loc_γ[$i] must be m_loc[$i] × n_γ = $(length(game.b_loc[i])) × $n_γ, got $(size(B_loc_γ[i]))"
+            @assert size(B_loc_γ[i]) == (length(b_loc[i]), n_γ) "[LQGNEP constructor] B_loc_γ[$i] must be m_loc[$i] × n_γ = $(length(b_loc[i])) × $n_γ, got $(size(B_loc_γ[i]))"
         end
-        @assert size(B_sh_γ) == (m_sh, n_γ) "[ParametricLQGNEP constructor] B_sh_γ must be m_sh × n_γ = $m_sh × $n_γ, got $(size(B_sh_γ))"
-        @assert length(ub) == n_γ "[ParametricLQGNEP constructor] ub must have length n_γ = $n_γ, got $(length(ub))"
-        @assert length(lb) == n_γ "[ParametricLQGNEP constructor] lb must have length n_γ = $n_γ, got $(length(lb))"
-        @assert all(lb .<= ub) "[ParametricLQGNEP constructor] lb must be componentwise ≤ ub"
-        @assert size(C, 2) == n_γ "[ParametricLQGNEP constructor] C must have n_γ = $n_γ columns, got $(size(C, 2))"
-        @assert size(C, 1) == length(d) "[ParametricLQGNEP constructor] C must have as many rows as length(d) = $(length(d)), got $(size(C, 1))"
+        @assert size(B_sh_γ) == (m_sh, n_γ) "[LQGNEP constructor] B_sh_γ must be m_sh × n_γ = $m_sh × $n_γ, got $(size(B_sh_γ))"
+        @assert length(ub) == n_γ "[LQGNEP constructor] ub must have length n_γ = $n_γ, got $(length(ub))"
+        @assert length(lb) == n_γ "[LQGNEP constructor] lb must have length n_γ = $n_γ, got $(length(lb))"
+        @assert all(lb .<= ub) "[LQGNEP constructor] lb must be componentwise ≤ ub"
+        @assert size(C, 2) == n_γ "[LQGNEP constructor] C must have n_γ = $n_γ columns, got $(size(C, 2))"
+        @assert size(C, 1) == length(d) "[LQGNEP constructor] C must have as many rows as length(d) = $(length(d)), got $(size(C, 1))"
 
-        return new(game, n_γ, Q_qγ, B_loc_γ, B_sh_γ, ub, lb, C, d)
+        return new(N, n, Q, q, A_loc, b_loc, A_sh, b_sh, n_γ, Q_qγ, B_loc_γ, B_sh_γ, ub, lb, C, d)
     end
-end
 
-# Returns a StaticLQGNEP out of a ParametricLQGNEP and a parameter vector
-function StaticLQGNEP(pg::ParametricLQGNEP, γ::AbstractVector)
-    game = pg.game
-    q = [game.q[i] + pg.Q_qγ[i] * γ for i in 1:game.N]
-    b_loc = [game.b_loc[i] + pg.B_loc_γ[i] * γ for i in 1:game.N]
-    b_sh = game.b_sh + pg.B_sh_γ * γ
-    return StaticLQGNEP(game.Q, q, game.A_loc, b_loc, game.A_sh, b_sh)
+    function LQGNEP(; Q, q, A_loc, b_loc, A_sh, b_sh,
+        Q_qγ=nothing, B_loc_γ=nothing, B_sh_γ=nothing, ub=nothing, lb=nothing, C=nothing, d=nothing)
+        LQGNEP(Q, q, A_loc, b_loc, A_sh, b_sh;
+            Q_qγ=Q_qγ, B_loc_γ=B_loc_γ, B_sh_γ=B_sh_γ, ub=ub, lb=lb, C=C, d=d)
+    end
+end #
+
+# Returns an LQGNEP with n_γ = 0, evaluated at a given parameter vector γ
+function LQGNEP(pg::LQGNEP, γ::AbstractVector)
+    q = [pg.q[i] + pg.Q_qγ[i] * γ for i in 1:pg.N]
+    b_loc = [pg.b_loc[i] + pg.B_loc_γ[i] * γ for i in 1:pg.N]
+    b_sh = pg.b_sh + pg.B_sh_γ * γ
+    return LQGNEP(pg.Q, q, pg.A_loc, b_loc, pg.A_sh, b_sh)
 end
 
 @doc raw"""
@@ -712,8 +674,8 @@ struct mpAVI #src usage
     end
 end #
 
-function mpAVI(pgame::ParametricLQGNEP)
-    game_no_par = StaticLQGNEP(pgame, zeros(pgame.n_γ))
+function mpAVI(pgame::LQGNEP)
+    game_no_par = LQGNEP(pgame, zeros(pgame.n_γ))
     avi = AVI(game_no_par)
     F = vcat(pgame.Q_qγ...)
     B = vcat(pgame.B_sh_γ, pgame.B_loc_γ...)
@@ -772,7 +734,7 @@ function AVI(mpAVI::mpAVI, θ::AbstractVector)
     return AVI(mpAVI.H, mpAVI.F * θ + mpAVI.f, mpAVI.A, mpAVI.B * θ + mpAVI.b)
 end
 
-function AVI(game::StaticLQGNEP)
+function AVI(game::LQGNEP)
     n = game.n
     N = game.N
     # Assemble Hessian (H) from Q blocks
@@ -805,12 +767,11 @@ Bilevel optimization problem, subject to the variable `x` being a generalized Na
 \mathrm{s.t.} \qquad A_\gamma \gamma \leq b_\gamma \\
  \qquad x^*\in \mathrm{GNE}(\gamma)
 ```
-The set `\mathrm{GNE}(\gamma)` is the Nash equilibrium set of either a [`ParametricLQGNEP`](@ref) or [`StaticLQGNEP`](@ref).
-at the given ``\gamma`` — see that type's docstring for how ``\gamma`` enters its cost and
-constraints.
+The set `\mathrm{GNE}(\gamma)` is the Nash equilibrium set of a [`LQGNEP`](@ref) at the given
+``\gamma`` — see that type's docstring for how ``\gamma`` enters its cost and constraints.
 
-`BilevelGame` can be constructed from either a [`ParametricLQGNEP`](@ref) or a
-[`StaticLQGNEP`](@ref). Passing  [`StaticLQGNEP`](@ref) fixes `n_γ = 0`, and the `BilevelGame` reduces to the problem of selecting the point in the (unparametrized)
+`BilevelGame` is constructed from a [`LQGNEP`](@ref). Passing one with `n_γ = 0` makes the
+`BilevelGame` reduce to the problem of selecting the point in the (unparametrized)
   Nash equilibrium set of `LowLevelGNEP` that minimizes `ϕ`.
 
 If `\phi` is a quadratic function, its defining matrices and vectors are stored such that
@@ -819,10 +780,10 @@ If `\phi` is a quadratic function, its defining matrices and vectors are stored 
 ```
 
 # Fields
-- `LowLevelGNEP::Union{ParametricLQGNEP, StaticLQGNEP}`: followers game.
+- `LowLevelGNEP::LQGNEP`: followers game.
 - `A_γ::Matrix{Float64}`: leader constraint matrix, size `m_γ × n_γ`.
 - `b_γ::Vector{Float64}`: leader constraint bounds, length `m_γ`.
-- `n_γ::Int`: number of leader decision variables (`0` when `LowLevelGNEP` is a `StaticLQGNEP`).
+- `n_γ::Int`: number of leader decision variables (`0` when `LowLevelGNEP.n_γ == 0`).
 - `ϕ::Function`: leader's objective, called as `ϕ(γ, x)`.
 - `is_quadratic::Bool`: whether `ϕ` is quadratic.
 - `Qγ::Union{Matrix{Float64},Nothing}`: leader-leader quadratic weight, size `n_γ × n_γ` (if `is_quadratic`).
@@ -832,7 +793,7 @@ If `\phi` is a quadratic function, its defining matrices and vectors are stored 
 - `qx::Union{Vector{Float64},Nothing}`: follower linear term, length `sum(n)` (if `is_quadratic`).
 """
 struct BilevelGame
-    LowLevelGNEP::Union{ParametricLQGNEP, StaticLQGNEP}
+    LowLevelGNEP::LQGNEP
     A_γ::Matrix{Float64}
     b_γ::Vector{Float64}
     n_γ::Int
@@ -845,7 +806,7 @@ struct BilevelGame
     qx::Union{Vector{Float64},Nothing}
 
     function BilevelGame(
-        LowLevelGNEP::Union{ParametricLQGNEP, StaticLQGNEP},
+        LowLevelGNEP::LQGNEP,
         Qx::AbstractMatrix,
         qx::AbstractVector;
         A_γ::Union{AbstractMatrix,Nothing}=nothing,
@@ -877,7 +838,7 @@ struct BilevelGame
     end
 
     function BilevelGame(
-        LowLevelGNEP::Union{ParametricLQGNEP, StaticLQGNEP},
+        LowLevelGNEP::LQGNEP,
         ϕ::Function;
         A_γ::Union{AbstractMatrix,Nothing}=nothing,
         b_γ::Union{AbstractVector,Nothing}=nothing,
@@ -898,9 +859,8 @@ struct BilevelGame
     end
 end
 
-# Returns (n_γ, n_tot) for either a ParametricLQGNEP or a plain StaticLQGNEP LowLevelGNEP.
-_retrieve_bilevel_n_γ_and_n_tot(LowLevelGNEP::ParametricLQGNEP) = (LowLevelGNEP.n_γ, sum(LowLevelGNEP.game.n))
-_retrieve_bilevel_n_γ_and_n_tot(LowLevelGNEP::StaticLQGNEP) = (0, sum(LowLevelGNEP.n))
+# Returns (n_γ, n_tot) for a LQGNEP LowLevelGNEP.
+_retrieve_bilevel_n_γ_and_n_tot(LowLevelGNEP::LQGNEP) = (LowLevelGNEP.n_γ, sum(LowLevelGNEP.n))
 
 # Validates/defaults the leader's own constraint on γ (A_γ γ ≤ b_γ), shared by the BilevelGame constructors.
 function _retrieve_bilevel_leader_constraints(

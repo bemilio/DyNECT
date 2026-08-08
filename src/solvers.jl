@@ -681,13 +681,13 @@ end
 ### Static GNEP solvers
 
 struct NabetaniParametrizationSolver
-    gnep::StaticLQGNEP
+    gnep::LQGNEP
     mpavi::mpAVI
     options::ParametricDAQP.Settings
     status::Ref{Symbol}
 end
 
-function CommonSolve.init(gnep::StaticLQGNEP, ::Type{NabetaniParametrizationSolver}; θub=nothing, θlb=nothing, verbose::Int64=1)
+function CommonSolve.init(gnep::LQGNEP, ::Type{NabetaniParametrizationSolver}; θub=nothing, θlb=nothing, verbose::Int64=1)
 
     options = ParametricDAQP.Settings(verbose=verbose)
     mpavi = NabetaniParametrization(gnep, θub=θub, θlb=θlb)
@@ -736,7 +736,7 @@ function CommonSolve.init(bilevel_game::BilevelGame, ::Type{PWAConvexOptSolver};
 end
 
 function CommonSolve.solve!(solver::PWAConvexOptSolver)
-    GNEP = solver.bilevel_game.LowLevelGNEP.game
+    GNEP = solver.bilevel_game.LowLevelGNEP
     GNEPsol = CommonSolve.solve(GNEP, NabetaniParametrizationSolver; verbose=solver.verbose)
     ϕ_x = x -> solver.bilevel_game.ϕ(Float64[], x)
     sol = select_optimal_gne(

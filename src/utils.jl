@@ -1,9 +1,9 @@
 ####### Type conversion functions #####
 
 @doc raw"""
-    DynLQGame2ParametricLQGNEP(prob::DynLQGame, T_hor::Int64)
+    DynLQGame2LQGNEP(prob::DynLQGame, T_hor::Int64)
 
-Constructs the [`ParametricLQGNEP`](@ref) followers' game for a dynamic Nash equilibrium
+Constructs the [`LQGNEP`](@ref) followers' game for a dynamic Nash equilibrium
 problem (`DynLQGame`) over a finite prediction horizon, with the initial state ``x_0`` as
 the external parameter ``\gamma``.
 
@@ -12,10 +12,10 @@ the external parameter ``\gamma``.
 - `T_hor::Int64`: Prediction horizon.
 
 # Returns
-- `ParametricLQGNEP`: the static GNEP over the stacked input sequence ``u``, parametrized by
+- `LQGNEP`: the static GNEP over the stacked input sequence ``u``, parametrized by
   ``\gamma = x_0``, equivalent to the [`mpAVI`](@ref) produced by [`DynLQGame2mpAVI`](@ref).
 """
-function DynLQGame2ParametricLQGNEP(prob::DynLQGame, T_hor::Int64)
+function DynLQGame2LQGNEP(prob::DynLQGame, T_hor::Int64)
     # prediction model: x̅ = Θx₀+(∑ Γᵢu̅ᵢ) + c̅
     Γ, Γi, Θ, c̅ = generate_prediction_model(prob.A, prob.B, T_hor; c=prob.c)
 
@@ -58,14 +58,14 @@ function DynLQGame2ParametricLQGNEP(prob::DynLQGame, T_hor::Int64)
     b_loc = [kron(ones(T_hor), prob.b_loc_i[i]) for i in 1:prob.N]
     B_loc_γ = [zeros(length(b_loc[i]), prob.nx) for i in 1:prob.N]
 
-    return ParametricLQGNEP(Q, q_static, A_loc, b_loc, A_sh, b_sh;
+    return LQGNEP(Q, q_static, A_loc, b_loc, A_sh, b_sh;
         Q_qγ=Q_qγ, B_loc_γ=B_loc_γ, B_sh_γ=B_sh_γ)
 end
 
 @doc raw"""
-    DynLQGame2ParametricLQGNEP(prob::DynLQGameTV)
+    DynLQGame2LQGNEP(prob::DynLQGameTV)
 
-Constructs the [`ParametricLQGNEP`](@ref) followers' game for a time-varying dynamic Nash
+Constructs the [`LQGNEP`](@ref) followers' game for a time-varying dynamic Nash
 equilibrium problem (`DynLQGameTV`) over its (fixed) prediction horizon `prob.Thor`, with
 the initial state ``x_0`` as the external parameter ``\gamma``.
 
@@ -74,10 +74,10 @@ the initial state ``x_0`` as the external parameter ``\gamma``.
   and constraints.
 
 # Returns
-- `ParametricLQGNEP`: the static GNEP over the stacked input sequence ``u``, parametrized by
+- `LQGNEP`: the static GNEP over the stacked input sequence ``u``, parametrized by
   ``\gamma = x_0``, equivalent to the [`mpAVI`](@ref) produced by [`DynLQGame2mpAVI`](@ref).
 """
-function DynLQGame2ParametricLQGNEP(prob::DynLQGameTV)
+function DynLQGame2LQGNEP(prob::DynLQGameTV)
     # prediction model: x̅ = Θx₀+(∑ Γᵢu̅ᵢ) + c̅
     Γ, Γi, Θ, c̅ = generate_prediction_model(prob.A, prob.B, prob.Thor; c=prob.c)
 
@@ -123,7 +123,7 @@ function DynLQGame2ParametricLQGNEP(prob::DynLQGameTV)
     b_loc = [vcat([prob.b_loc[t][i] for t in 1:prob.Thor]...) for i in 1:prob.N]
     B_loc_γ = [zeros(length(b_loc[i]), prob.nx) for i in 1:prob.N]
 
-    return ParametricLQGNEP(Q, q_static, A_loc, b_loc, A_sh, b_sh;
+    return LQGNEP(Q, q_static, A_loc, b_loc, A_sh, b_sh;
         Q_qγ=Q_qγ, B_loc_γ=B_loc_γ, B_sh_γ=B_sh_γ)
 end
 
@@ -132,8 +132,8 @@ end
 
 Constructs the parametric variational inequality ([`mpAVI`](@ref)) for a dynamic Nash
 equilibrium problem (`DynLQGame`) over a finite prediction horizon, by building the
-equivalent [`ParametricLQGNEP`](@ref) via [`DynLQGame2ParametricLQGNEP`](@ref) and
-converting it with `mpAVI(::ParametricLQGNEP)`.
+equivalent [`LQGNEP`](@ref) via [`DynLQGame2LQGNEP`](@ref) and
+converting it with `mpAVI(::LQGNEP)`.
 
 # Arguments
 - `prob::DynLQGame`: Dynamic game structure containing system dynamics, cost, and constraints.
@@ -145,7 +145,7 @@ converting it with `mpAVI(::ParametricLQGNEP)`.
   sequence for all agents and ``x_0`` is the initial state.
 """
 function DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
-    return mpAVI(DynLQGame2ParametricLQGNEP(prob, T_hor))
+    return mpAVI(DynLQGame2LQGNEP(prob, T_hor))
 end
 
 @doc raw"""
@@ -153,8 +153,8 @@ end
 
 Constructs the parametric variational inequality ([`mpAVI`](@ref)) for a time-varying
 dynamic Nash equilibrium problem (`DynLQGameTV`) over its (fixed) prediction horizon
-`prob.Thor`, by building the equivalent [`ParametricLQGNEP`](@ref) via
-[`DynLQGame2ParametricLQGNEP`](@ref) and converting it with `mpAVI(::ParametricLQGNEP)`.
+`prob.Thor`, by building the equivalent [`LQGNEP`](@ref) via
+[`DynLQGame2LQGNEP`](@ref) and converting it with `mpAVI(::LQGNEP)`.
 
 # Arguments
 - `prob::DynLQGameTV`: Time-varying dynamic game structure containing system dynamics, cost,
@@ -166,36 +166,37 @@ dynamic Nash equilibrium problem (`DynLQGameTV`) over its (fixed) prediction hor
   sequence for all agents and ``x_0`` is the initial state.
 """
 function DynLQGame2mpAVI(prob::DynLQGameTV)
-    return mpAVI(DynLQGame2ParametricLQGNEP(prob))
+    return mpAVI(DynLQGame2LQGNEP(prob))
 end
 
 @doc raw"""
-    StaticGNE2mpAVI(game::StaticLQGNEP)
- 
-Assemble static GNE game into multi-parametric variational inequality (mpAVI).
- 
+    NabetaniParametrization(game::LQGNEP; θub=nothing, θlb=nothing)
+
+Assemble a (possibly parametric) GNE game into a multi-parametric variational inequality (mpAVI).
+
 The Nabetani-Tseng-Fukushima reparametrization transforms shared constraints into parameter-dependent bounds:
 - Agent 1: ``A_{\text{sh},1} x_1 \leq \theta_1``
 - Agent i (i>1): ``A_{\text{sh},i} x_i \leq -\theta_{i-1} + b_{\text{sh}}``
- 
-Returns: ``\text{VI}(H x + f, A x \leq B \theta + b)`` where ``\theta \in [\text{lb}, \text{ub}]``
+
+The Nabetani parameter ``\theta`` is stacked together with `game`'s own parameter ``\gamma``
+(zero-dimensional if `game` is not parametric) into a single combined mpAVI parameter.
+
+Returns: ``\text{VI}(H x + F [\theta;\gamma] + f, A x \leq B [\theta;\gamma] + b)`` where
+``\theta \in [\text{lb}, \text{ub}]`` and ``C\gamma \leq d``.
 """
-function NabetaniParametrization(game::StaticLQGNEP; θub::Union{Vector{Float64},Nothing}=nothing, θlb::Union{Vector{Float64},Nothing}=nothing)
+function NabetaniParametrization(game::LQGNEP; θub::Union{Vector{Float64},Nothing}=nothing, θlb::Union{Vector{Float64},Nothing}=nothing)
     # Infer dimensions
     N = game.N
     n = game.n
     n_total = sum(n)
     m_sh = length(game.b_sh)
-    n_theta = (N - 1) * m_sh
+    n_param = (N - 1) * m_sh + game.n_γ
+    # Check size of bounds, default to ±100 
+    θub = isnothing(θub) ? 100 .* ones((N - 1) * m_sh) : θub
+    θlb = isnothing(θlb) ? -100 .* ones((N - 1) * m_sh) : θlb
+    @assert length(θub)==(game.N-1) * m_sh "# of par. upper bounds is $((game.N-1) * m_sh), got $(length(θub))"
+    @assert length(θlb)==(game.N-1) * m_sh "# of par. low bounds is $((game.N-1) * m_sh), got $(length(θlb)) "
 
-    # Check size of bounds
-    if !isnothing(θub) 
-        @assert length(θub)==(game.N-1) * m_sh "# of par. upper bounds is $((game.N-1) * m_sh), got $(length(θub))"
-    end
-    if !isnothing(θlb)
-        @assert length(θlb)==(game.N-1) * m_sh "# of par. low bounds is $((game.N-1) * m_sh), got $(length(θlb)) "
-    end
-    
     # Assemble Hessian (H) from Q blocks 
     H = BlockArray{Float64}(undef_blocks, n, n)
     for i in 1:N
@@ -214,37 +215,49 @@ function NabetaniParametrization(game::StaticLQGNEP; θub::Union{Vector{Float64}
 
     # Assemble Nabetani reparametrization
     # A_hat = blkdiag(A_sh[1], A_sh[2], ..., A_sh[N])
-    A_hat_blocks = [game.A_sh[i] for i in 1:N]
-    A_hat = BlockDiagonal(A_hat_blocks)
+    A_hat = BlockDiagonal(game.A_sh)
     A_hat = Matrix(A_hat)
     
     # B_g structure (correct for N ≥ 2):
     # Shape: (N*m_sh) × ((N-1)*m_sh)
     # Top block: I_{(N-1)*m_sh}    (agents 1,...,N-1 get explicit allocation θ)
     # Bottom block: -ones(m_sh, (N-1)*m_sh)  (agent N gets remainder)
-    B_g_top = I((N - 1) * m_sh)
-    B_g_bottom = kron(-1 .* ones(1, N-1), Matrix(I, m_sh, m_sh))
+    B_g_top = hcat(Matrix{Float64}(I((N - 1) * m_sh)), zeros((N - 1) * m_sh, game.n_γ))
+    # [-I, ..., -I, game.B_sh_γ]
+    B_g_bottom = hcat(kron(-1 .* ones(1, N-1), Matrix(I, m_sh, m_sh)), game.B_sh_γ)
     B_g = vcat(B_g_top, B_g_bottom)
-    
+
     # d_g = [zeros((N-1)*m_sh); b_sh]
     d_g = vcat(zeros((N - 1) * m_sh), game.b_sh)
-    
-    # Stack all constraints 
+
+    # Stack all constraints
     A = vcat(A_loc, A_hat)
-    
+
     # B matrix: local constraints have no theta dependence (zeros), shared constraints have B_g
-    B_loc = zeros(size(A_loc, 1), n_theta)
+    B_loc = hcat(zeros(size(A_loc, 1), (N - 1) * m_sh), vcat(game.B_loc_γ...))
     B = vcat(B_loc, B_g)
-    
+
     b = vcat(b_loc, d_g)
-    
+
+    # Assemble F (γ-sensitivity of the objective), zero-padded for the Nabetani-θ columns
+    # (F and B must share the same n_param columns, since both are multiplied by the combined [θ; γ])
+    F = hcat(zeros(n_total, (N - 1) * m_sh), vcat(game.Q_qγ...))
+
+    # γ polytope constraint (Cγ ≤ d), zero-padded for the Nabetani-θ columns
+    C = hcat(zeros(size(game.C, 1), (N - 1) * m_sh), game.C)
+    d = game.d
+
     # Return mpAVI
-    return mpAVI(H, zeros(n_total, n_theta), f, A, B, b, ub=θub, lb=θlb)
+    ub = vcat(θub, game.ub)
+    lb = vcat(θlb, game.lb)
+    @assert length(ub) == n_param && length(lb) == n_param "[NabetaniParametrization] internal size mismatch: expected $n_param parameters, got ub=$(length(ub)), lb=$(length(lb))"
+
+    return mpAVI(H, F, f, A, B, b, C=C, d=d, ub=ub, lb=lb)
 end
 ####### END Type conversion functions #######
 
 ####### Helper functions for optimal GNE selection ##########
-function filter_gne_crs!(sol::ParametricDAQP.Solution, game::StaticLQGNEP)
+function filter_gne_crs!(sol::ParametricDAQP.Solution, game::LQGNEP)
     N = game.N
     m_sh = length(game.b_sh)
     n_local = sum(size(game.A_loc[i], 1) for i in 1:N)

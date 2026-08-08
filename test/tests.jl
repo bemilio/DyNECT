@@ -238,10 +238,10 @@ end
     @test norm(u_inf - u) < 1e-5
 end
 
-@testset "StaticLQGNEP" begin
+@testset "LQGNEP" begin
     # Scalar Rosen example using Nabetani reformulation + mpAVI solver
-    gnep = DyNECT.StaticLQGNEP(
-        Q = [[[1.;;], [-1.;;]], 
+    gnep = DyNECT.LQGNEP(
+        Q = [[[1.;;], [-1.;;]],
              [[1.;;], [2.;;]]],
         q = [[0.], [0.]],
         A_loc = [zeros(0, 1), zeros(0, 1)],
@@ -268,6 +268,47 @@ end
     @test all_solutions_found
 end
 
+@testset "ParametricLQGNEP" begin
+    # Scalar Rosen example using Nabetani reformulation + mpAVI solver,
+    # where the game itself depends on a parameter γ (parametric LQGNEP).
+    gnep = DyNECT.LQGNEP(
+        Q = [[[1.;;], [-1.;;]],
+             [[1.;;], [2.;;]]],
+        q = [[0.], [0.]],
+        A_loc = [zeros(0, 1), zeros(0, 1)],
+        b_loc = [Float64[], Float64[]],
+        A_sh = [[-1;;], [-1;;]],
+        b_sh = [0.],
+        B_sh_γ = [-1.;;]
+    )
+
+    θub = [5.0]
+    θlb = [-5.0]
+    sol = CommonSolve.solve(gnep, DyNECT.NabetaniParametrizationSolver; θub = θub, θlb = θlb, verbose = 0)
+
+
+    # Test solution: x1 = γ - x2, -γ < x2 < γ/2, where γ is the parameter of the parametric game
+    # θ is the parameter of the nabetani parametrization that carachterizes all GNEs for a given γ
+    tol = 1e-6
+    function check_all_solutions(sol, tol)
+        all_solutions_found = true
+        for γ in 0:0.1:1
+            for θ in -γ:0.1:γ/2
+                x = DyNECT.evaluatePWA(sol, [θ; γ])
+                if !isnothing(x)
+                    ok_eq = norm(x[1] - (γ - x[2])) < tol
+                    ok_bounds = (-γ - tol <= x[2] <= γ/2 + tol)
+                    all_solutions_found = all_solutions_found & ok_eq
+                    all_solutions_found = all_solutions_found & ok_bounds
+                end
+            end
+        end
+        return all_solutions_found
+    end
+    all_solutions_found = check_all_solutions(sol, tol)
+    @test all_solutions_found
+end
+
 
 
 @testset "OptimalGNESelection" begin
@@ -291,7 +332,7 @@ end
     b_sh = [1.; 
             2.]
 
-    gnep = DyNECT.StaticLQGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
+    gnep = DyNECT.LQGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
 
     # restrict parameter space for reparametrization
     θub =  [5.0; 5.0]
@@ -325,7 +366,7 @@ end
     for test in 1:1000
         x_des = rand(2) * .5
         ϕ(γ, x) = sum(abs2, x - x_des) # |x-x_des|²
-        bilevel_game = BilevelGame(ParametricLQGNEP(gnep), ϕ)
+        bilevel_game = BilevelGame(gnep, ϕ)
         result = CommonSolve.solve(bilevel_game, DyNECT.PWAConvexOptSolver; verbose = 0)
 
         proj1 = closest_point_on_segment(x_des, [0.0, 1.0], [1 / 3, 2 / 3])   # x2 = 1 - x1,  x1 ∈ [0, 1/3]

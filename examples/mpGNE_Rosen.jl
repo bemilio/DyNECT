@@ -22,7 +22,7 @@ b_loc = [[], []] # No local constraints
 A_sh = [[-1;;], [-1;;]]
 b_sh = [-1.]
 
-gnep = DyNECT.StaticLQGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
+gnep = DyNECT.LQGNEP(Q, q, A_loc, b_loc, A_sh, b_sh)
 
 # ============================================================================
 # Step 2: Solve parametrically
