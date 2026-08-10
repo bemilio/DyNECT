@@ -510,7 +510,6 @@ struct LQGNEP
         N = length(Q)
         # Infer size of decision variables
         n = [size(Q[i][i], 1) for i in 1:N]
-        @assert N >= 2 "N must be at least 2 (Nash equilibrium requires multiple players)"
         @assert all(n .> 0) "All player dimensions n[i] must be positive"
         @assert all(length(Qi) == N for Qi in Q) "Each element of Q must have length $(N) (one matrix per agent)"
         for i in 1:N

@@ -230,7 +230,7 @@ end
     params = DyNECT.IterativeSolverParams(verbose=true)
     solution = CommonSolve.solve(avi, DyNECT.DouglasRachford; params=params)
     if solution.status == :Solved
-        u = vcat(DyNECT.first_input_of_sequence(solution.x, prob.nu, prob.N, T_hor)...)
+        u = vcat(DyNECT.extract_input_at_timestep(solution.x, prob.nu, prob.N, T_hor, 1)...)
     else
         @error "VI solution not found"
     end
@@ -309,6 +309,78 @@ end
     @test all_solutions_found
 end
 
+@testset "SoftenedStateConstraints" begin
+    # Scalar dynamics x[1] = u1 + u2 (A=1, c=0, B_i=1), single step (T_hor=1).
+    # Terminal cost per agent: 0.5*x1^2 - 2*x1 (P=1, p=-2).
+    # Running cost per agent: 0.5*u_i^2 (R_ii=1).
+    # Hard state constraint: x1 <= 1.
+    #
+    # Unconstrained NE: u1=u2=2/3 (x1=4/3), which violates x1<=1, so the
+    # constraint binds. By hand (KKT of the variational GNE):
+    #   hard-constrained solution:            u1=u2=0.5           (x1=1, multiplier λ=0.5)
+    #   softened, per-agent copy w/ cost k*s_i:
+    #     for k >= 0.25: s1=s2=0, u1=u2=0.5   (softening unused, matches hard solution)
+    #     for k <  0.25: s1=s2=(1-4k)/3, u1=u2=(2-2k)/3  (agents pay to relax)
+    nx = 1
+    N = 2
+    nu = [1, 1]
+    T_hor = 1
+
+    A = ones(1, 1)
+    B = [ones(1, 1), ones(1, 1)]
+    Q = [zeros(1, 1), zeros(1, 1)]
+    R = [[zeros(1, 1) for j in 1:N] for i in 1:N]
+    for i in 1:N
+        R[i][i] .= ones(1, 1)
+    end
+    P = [ones(1, 1), ones(1, 1)]
+    p = [[-2.0], [-2.0]]
+
+    C_x = ones(1, 1)
+    b_x = [1.0]
+    C_loc_vec = [zeros(0, 1) for i in 1:N]
+    b_loc_vec = [zeros(0) for i in 1:N]
+    C_u_vec = [zeros(0, 1) for i in 1:N]
+    b_u = zeros(0)
+
+    prob = DynLQGame(
+        A=A, B=B, Q=Q, R=R, P=P, p=p,
+        C_x=C_x, b_x=b_x,
+        C_loc_vec=C_loc_vec, b_loc_vec=b_loc_vec,
+        C_u_vec=C_u_vec, b_u=b_u)
+
+    x0 = [0.0]
+    tol = 1e-4
+    params_hard = DyNECT.IterativeSolverParams(warmstart=:NoWarmStart)
+    params_soft = DyNECT.IterativeSolverParams(warmstart=:NoWarmStart)
+
+    function solve_at(gnep, params)
+        mpVI = DyNECT.mpAVI(gnep)
+        avi = DyNECT.AVI(mpVI, x0)
+        return CommonSolve.solve(avi, DyNECT.DouglasRachford; params=params)
+    end
+
+    # Hard-constrained baseline
+    gnep_hard = DyNECT.DynLQGame2LQGNEP(prob, T_hor)
+    sol_hard = solve_at(gnep_hard, params_hard)
+    @test sol_hard.status == :Solved
+    u_hard = vcat(DyNECT.extract_input_at_timestep(sol_hard.x, prob.nu, prob.N, T_hor, 1)...)
+    @test norm(u_hard - [0.5, 0.5]) < tol
+
+    # Softened, large k: softening unused, should match the hard-constrained solution
+    gnep_soft_large = DyNECT.DynLQGame2LQGNEP(prob, T_hor; soften_state_constraints=true, k=[[1e3], [1e3]])
+    sol_soft_large = solve_at(gnep_soft_large, params_soft)
+    @test sol_soft_large.status == :Solved
+    u_soft_large = vcat(DyNECT.extract_input_at_timestep(sol_soft_large.x, prob.nu, prob.N, T_hor, 1; n_slack=nx*T_hor)...)
+    @test norm(u_soft_large - u_hard) < tol
+
+    # Softened, small k: agents pay to relax the constraint, matching the hand-derived values
+    gnep_soft_small = DyNECT.DynLQGame2LQGNEP(prob, T_hor; soften_state_constraints=true, k=[[0.01], [0.01]])
+    sol_soft_small = solve_at(gnep_soft_small, params_soft)
+    @test sol_soft_small.status == :Solved
+    u_soft_small = vcat(DyNECT.extract_input_at_timestep(sol_soft_small.x, prob.nu, prob.N, T_hor, 1; n_slack=nx*T_hor)...)
+    @test norm(u_soft_small - [0.66, 0.66]) < tol
+end
 
 
 @testset "OptimalGNESelection" begin

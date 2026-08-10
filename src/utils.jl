@@ -1,7 +1,8 @@
 ####### Type conversion functions #####
 
 @doc raw"""
-    DynLQGame2LQGNEP(prob::DynLQGame, T_hor::Int64)
+    DynLQGame2LQGNEP(prob::DynLQGame, T_hor::Int64;
+        soften_state_constraints::Bool=false, k::Union{Nothing,Vector{Float64}}=nothing)
 
 Constructs the [`LQGNEP`](@ref) followers' game for a dynamic Nash equilibrium
 problem (`DynLQGame`) over a finite prediction horizon, with the initial state ``x_0`` as
@@ -10,60 +11,124 @@ the external parameter ``\gamma``.
 # Arguments
 - `prob::DynLQGame`: Dynamic game structure containing system dynamics, cost, and constraints.
 - `T_hor::Int64`: Prediction horizon.
+- `soften_state_constraints::Bool`: if `true`, the state constraint ``C_x x[t] \leq b_x`` is
+  softened per agent, per constraint row, and per timestep: agent ``i`` gets its own slack
+  variable ``s_{i,l,t} \geq 0`` for each row ``l = 1,\dots,m_x`` of ``C_x`` and each timestep
+  ``t``, and row ``l`` at time ``t`` becomes ``C_x[l,:] x[t] \leq b_x[l] + s_{i,l,t}`` (one
+  relaxed copy per agent), with ``k_i[l] s_{i,l,t}`` added to agent ``i``'s cost (the same
+  per-row cost `k_i[l]` at every timestep). The `T_hor*prob.m_x` slacks
+  ``s_{i,1,1},\dots,s_{i,m_x,T\_hor}`` are appended as the last `T_hor*prob.m_x` entries of
+  agent `i`'s decision vector.
+- `k::Union{Nothing,Vector{Vector{Float64}}}`: per-agent, per-state-constraint-row softening
+  cost, required (length `prob.N`, each entry of length `prob.m_x`, componentwise
+  nonnegative) when `soften_state_constraints=true`.
 
 # Returns
-- `LQGNEP`: the static GNEP over the stacked input sequence ``u``, parametrized by
-  ``\gamma = x_0``, equivalent to the [`mpAVI`](@ref) produced by [`DynLQGame2mpAVI`](@ref).
+- `LQGNEP`: the static GNEP over the stacked input sequence ``u`` (and, if softened, each
+  agent's own slack ``s_i``), parametrized by ``\gamma = x_0``, equivalent to the
+  [`mpAVI`](@ref) produced by [`DynLQGame2mpAVI`](@ref) (when `soften_state_constraints=false`).
 """
-function DynLQGame2LQGNEP(prob::DynLQGame, T_hor::Int64)
+function DynLQGame2LQGNEP(prob::DynLQGame, T_hor::Int64;
+    soften_state_constraints::Bool=false,
+    k::Union{Nothing,Vector{Vector{Float64}}}=nothing)
+    if soften_state_constraints
+        @assert !isnothing(k) "k (per-agent, per-state-constraint softening cost) must be provided when soften_state_constraints=true"
+        @assert length(k) == prob.N "k must have one entry per agent"
+        @assert all(length(k[i]) == prob.m_x for i in 1:prob.N) "k[i] must have one entry per state constraint (prob.m_x = $(prob.m_x))"
+        @assert all(all(k[i] .>= 0) for i in 1:prob.N) "k must be componentwise nonnegative"
+    end
+
     # prediction model: x̅ = Θx₀+(∑ Γᵢu̅ᵢ) + c̅
     Γ, Γi, Θ, c̅ = generate_prediction_model(prob.A, prob.B, T_hor; c=prob.c)
 
     # Define Q̅[i] = blkdg(Q[1][i],..., Q[T][i], P[i])
     Q̅ = [BlockDiagonal([kron(I(T_hor - 1), prob.Q[i]), prob.P[i]]) for i in 1:prob.N]
 
-    Q_static = Matrix{Matrix{Float64}}(undef, prob.N, prob.N)
-    for i in 1:prob.N
-        QiΓ = Γi[i]' * Q̅[i]
-        for j in 1:prob.N
-            Q_static[i, j] = Matrix{Float64}(QiΓ * Γi[j] + kron(I(T_hor), prob.R[i][j]))
-        end
-    end
-    Q = [[Q_static[i, j] for j in 1:prob.N] for i in 1:prob.N]
-
-    # Parametric affine influence of x0 on the objective (γ = x0)
-    Q_qγ = [Matrix{Float64}(Γi[i]' * Q̅[i] * Θ) for i in 1:prob.N]
-
-    # define f (affine, γ=0 part of the VI mapping)
-    q_static = Vector{Vector{Float64}}(undef, prob.N)
-    for i in 1:prob.N
-        q̅i = vcat(kron(ones(T_hor - 1), prob.q[i]), prob.p[i])
-        r̅i = kron(ones(T_hor), prob.r[i])
-        q_static[i] = Γi[i]' * (Q̅[i] * c̅ + q̅i) + r̅i
-    end
-
-    ## Constraints
-    # Cₓ*x[t] ≤ bₓ ∀ t ==> C̅ₓΓu̅ <= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅
-    # where C̅ₓ = I ⊗ Cₓ
+    # C̅ₓ = I ⊗ Cₓ
     C̅_x = kron(I(T_hor), prob.C_x)
 
-    # Shared constraints (input + state), one column block per agent, same rows for all agents
-    A_sh = [Matrix{Float64}([kron(I(T_hor), prob.C_u_i[i]); C̅_x * Γi[i]]) for i in 1:prob.N]
-    b_sh = vcat(kron(ones(T_hor), prob.b_u), kron(ones(T_hor), prob.b_x) - C̅_x * c̅)
-    # Parametric affine influence of x0 on the shared constraints (γ = x0)
-    B_sh_γ = Matrix{Float64}([zeros(T_hor * prob.m_u, prob.nx); -1 * C̅_x * Θ])
+    # Define  Shared constraints
+    A_sh_input = [Matrix{Float64}(kron(I(T_hor), prob.C_u_i[i])) for i in 1:prob.N]
+    b_input = kron(ones(T_hor), prob.b_u)
+    B_input_γ = zeros(T_hor * prob.m_u, prob.nx) # Maps from x₀ to shared input constraints
 
-    # Local constraints, per agent (independent of x0)
-    A_loc = [Matrix{Float64}(kron(I(T_hor), prob.C_loc_i[i])) for i in 1:prob.N]
-    b_loc = [kron(ones(T_hor), prob.b_loc_i[i]) for i in 1:prob.N]
-    B_loc_γ = [zeros(length(b_loc[i]), prob.nx) for i in 1:prob.N]
+    # Cₓ*x[t] ≤ bₓ ∀ t ==> C̅ₓΓu̅ <= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅, where C̅ₓ = I ⊗ Cₓ
+    A_sh_state = [Matrix{Float64}(C̅_x * Γi[i]) for i in 1:prob.N]
+    b_state = kron(ones(T_hor), prob.b_x) - C̅_x * c̅
+    B_state_γ = -1 * C̅_x * Θ # Maps from x₀ to state constraints (remapped as input constraints)
+
+    # If state constraints are softened: introduce slack sᵢ
+    # Cₓ*x[t] ≤ bₓ + sᵢᵗ ∀ t
+    # ==> C̅ₓΓu̅ <= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅  + sᵢ, ∀ i 
+    # ==> [C̅ₓΓᵢ -I] [u̅; sᵢ] +  ∑ⱼ C̅ₓΓⱼ u̅ⱼ <= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅, ∀ i 
+    # Define Aₓⁱ = C̅ₓΓᵢ:
+    # ==> [Aₓⁱ -I] [u̅ᵢ; sᵢ] + ∑ⱼ [Aₓʲ 0] [u̅ⱼ; sⱼ]<= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅ᵢ, ∀ i 
+    # Therefore, we need to introduce one shared constraint per agent (A_sh[i] is built
+    # further below).
+    n_copies = soften_state_constraints ? prob.N : 1
+    b_sh = vcat(b_input, repeat(b_state, n_copies))
+    B_sh_γ = vcat(B_input_γ, repeat(B_state_γ, n_copies, 1))
+
+    Q = Vector{Vector{Matrix{Float64}}}(undef, prob.N)
+    Q_qγ = Vector{Matrix{Float64}}(undef, prob.N)
+    q_static = Vector{Vector{Float64}}(undef, prob.N)
+    A_loc = Vector{Matrix{Float64}}(undef, prob.N)
+    b_loc = Vector{Vector{Float64}}(undef, prob.N)
+    B_loc_γ = Vector{Matrix{Float64}}(undef, prob.N)
+    A_sh = Vector{Matrix{Float64}}(undef, prob.N)
+
+    for i in 1:prob.N
+        QiΓ = Γi[i]' * Q̅[i]
+        Qi = [Matrix{Float64}(QiΓ * Γi[j] + kron(I(T_hor), prob.R[i][j])) for j in 1:prob.N]
+
+        q̅i = vcat(kron(ones(T_hor - 1), prob.q[i]), prob.p[i])
+        r̅i = kron(ones(T_hor), prob.r[i])
+        qi = Γi[i]' * (Q̅[i] * c̅ + q̅i) + r̅i
+        Qqγ_i = Matrix{Float64}(QiΓ * Θ)
+
+        Aloc_i = Matrix{Float64}(kron(I(T_hor), prob.C_loc_i[i]))
+        bloc_i = kron(ones(T_hor), prob.b_loc_i[i])
+
+        if soften_state_constraints
+            n_slack = prob.m_x * T_hor # number of slack variables per agent i
+
+            # Pad Q with zeros (associated to slack variable)
+            Q[i] = [vcat(hcat(Qij, zeros(size(Qij, 1), n_slack)), zeros(n_slack, size(Qij, 2) + n_slack)) for Qij in Qi]
+            Q_qγ[i] = vcat(Qqγ_i, zeros(n_slack, prob.nx))
+            # Add linear cost on slack variable
+            q_static[i] = vcat(qi, kron(ones(T_hor), k[i]))
+            
+            # Pad local input constraints with zeros (associated to slack variable)
+            # Add local constraints that slack variable is ≥0
+            A_loc[i] = vcat(hcat(Aloc_i, zeros(size(Aloc_i, 1), n_slack)),
+                             hcat(zeros(n_slack, size(Aloc_i, 2)), -Matrix{Float64}(I(n_slack))))
+            b_loc[i] = vcat(bloc_i, zeros(n_slack))
+            B_loc_γ[i] = zeros(length(bloc_i) + n_slack, prob.nx)
+
+            # See above: soft state constraint becomes
+            # [Aₓⁱ -I] [u̅ᵢ; sᵢ] + ∑ⱼ [Aₓʲ 0] [u̅ⱼ; sⱼ] ≤ b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅ᵢ, ∀ i 
+            A_sh[i] = vcat(hcat(A_sh_input[i], zeros(size(A_sh_input[i], 1), n_slack)),
+                vcat([hcat(A_sh_state[i], (i == j) * (-Matrix{Float64}(I(n_slack)))) for j in 1:n_copies]...))
+        else
+            Q[i] = Qi
+            Q_qγ[i] = Qqγ_i
+            q_static[i] = qi
+
+            A_loc[i] = Aloc_i
+            b_loc[i] = bloc_i
+            B_loc_γ[i] = zeros(length(bloc_i), prob.nx)
+
+            A_sh[i] = vcat(A_sh_input[i], A_sh_state[i])
+        end
+    end
 
     return LQGNEP(Q, q_static, A_loc, b_loc, A_sh, b_sh;
         Q_qγ=Q_qγ, B_loc_γ=B_loc_γ, B_sh_γ=B_sh_γ)
 end
 
 @doc raw"""
-    DynLQGame2LQGNEP(prob::DynLQGameTV)
+    DynLQGame2LQGNEP(prob::DynLQGameTV;
+        soften_state_constraints::Bool=false, k::Union{Nothing,Vector{Float64}}=nothing)
 
 Constructs the [`LQGNEP`](@ref) followers' game for a time-varying dynamic Nash
 equilibrium problem (`DynLQGameTV`) over its (fixed) prediction horizon `prob.Thor`, with
@@ -72,12 +137,34 @@ the initial state ``x_0`` as the external parameter ``\gamma``.
 # Arguments
 - `prob::DynLQGameTV`: Time-varying dynamic game structure containing system dynamics, cost,
   and constraints.
+- `soften_state_constraints::Bool`: if `true`, the state constraint ``C_x^t x[t] \leq b_x^t`` is
+  softened per agent, per constraint row, and per timestep (requires the same `m_x` at every
+  timestep): agent ``i`` gets its own slack variable ``s_{i,l,t} \geq 0`` for each row
+  ``l = 1,\dots,m_x`` of ``C_x^t`` and each timestep ``t``, and row ``l`` at time ``t``
+  becomes ``C_x^t[l,:] x[t] \leq b_x^t[l] + s_{i,l,t}`` (one relaxed copy per agent), with
+  ``k_i[l] s_{i,l,t}`` added to agent ``i``'s cost (the same per-row cost `k_i[l]` at every
+  timestep). The `prob.Thor*prob.m_x` slacks ``s_{i,1,1},\dots,s_{i,m_x,Thor}`` are appended
+  as the last `prob.Thor*prob.m_x` entries of agent `i`'s decision vector.
+- `k::Union{Nothing,Vector{Vector{Float64}}}`: per-agent, per-state-constraint-row softening
+  cost, required (length `prob.N`, each entry of length `prob.m_x`, componentwise
+  nonnegative) when `soften_state_constraints=true`.
 
 # Returns
-- `LQGNEP`: the static GNEP over the stacked input sequence ``u``, parametrized by
-  ``\gamma = x_0``, equivalent to the [`mpAVI`](@ref) produced by [`DynLQGame2mpAVI`](@ref).
+- `LQGNEP`: the static GNEP over the stacked input sequence ``u`` (and, if softened, each
+  agent's own slack ``s_i``), parametrized by ``\gamma = x_0``, equivalent to the
+  [`mpAVI`](@ref) produced by [`DynLQGame2mpAVI`](@ref) (when `soften_state_constraints=false`).
 """
-function DynLQGame2LQGNEP(prob::DynLQGameTV)
+function DynLQGame2LQGNEP(prob::DynLQGameTV;
+    soften_state_constraints::Bool=false,
+    k::Union{Nothing,Vector{Vector{Float64}}}=nothing)
+    if soften_state_constraints
+        @assert !isnothing(k) "k (per-agent, per-state-constraint softening cost) must be provided when soften_state_constraints=true"
+        @assert length(k) == prob.N "k must have one entry per agent"
+        @assert all(length(k[i]) == prob.m_x for i in 1:prob.N) "k[i] must have one entry per state constraint (prob.m_x = $(prob.m_x))"
+        @assert all(all(k[i] .>= 0) for i in 1:prob.N) "k must be componentwise nonnegative"
+        @assert all(size(prob.C_x[t], 1) == prob.m_x for t in 1:prob.Thor) "soften_state_constraints requires the same number of state constraints (m_x) at every timestep"
+    end
+
     # prediction model: x̅ = Θx₀+(∑ Γᵢu̅ᵢ) + c̅
     Γ, Γi, Θ, c̅ = generate_prediction_model(prob.A, prob.B, prob.Thor; c=prob.c)
 
@@ -87,41 +174,82 @@ function DynLQGame2LQGNEP(prob::DynLQGameTV)
         for i in 1:prob.N
     ]
 
-    Q_static = Matrix{Matrix{Float64}}(undef, prob.N, prob.N)
-    for i in 1:prob.N
-        QiΓ = Γi[i]' * Q̅[i]
-        for j in 1:prob.N
-            Q_static[i, j] = Matrix{Float64}(QiΓ * Γi[j] + BlockDiagonal([prob.R[t][i][j] for t = 1:prob.Thor]))
-        end
-    end
-    Q = [[Q_static[i, j] for j in 1:prob.N] for i in 1:prob.N]
-
-    # Parametric affine influence of x0 on the objective (γ = x0)
-    Q_qγ = [Matrix{Float64}(Γi[i]' * Q̅[i] * Θ) for i in 1:prob.N]
-
-    # define f (affine, γ=0 part of the VI mapping)
-    q_static = Vector{Vector{Float64}}(undef, prob.N)
-    for i in 1:prob.N
-        q̅i = vcat([prob.q[t][i] for t in 1:prob.Thor-1]..., prob.p[i])
-        r̅i = vcat([prob.r[t][i] for t in 1:prob.Thor]...)
-        q_static[i] = Γi[i]' * (Q̅[i] * c̅ + q̅i) + r̅i
-    end
-
-    ## Constraints
-    # Cᵗₓ*x[t] ≤ bᵗₓ ∀ t ==> C̅ₓΓu̅ <= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅
-    # where C̅ₓ = blkdiag(C¹ₓ, ...,Cᵗₓ)
+    # Cᵗₓ*x[t] ≤ bᵗₓ ∀ t ==> C̅ₓΓu̅ <= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅, where C̅ₓ = blkdiag(C¹ₓ, ...,Cᵗₓ)
     C̅_x = BlockDiagonal(prob.C_x)
 
-    # Shared constraints (input + state), one column block per agent, same rows for all agents
-    A_sh = [Matrix{Float64}([BlockDiagonal([prob.C_u[t][i] for t in 1:prob.Thor]); C̅_x * Γi[i]]) for i in 1:prob.N]
-    b_sh = vcat(vcat(prob.b_u...), vcat(prob.b_x...) - C̅_x * c̅)
-    # Parametric affine influence of x0 on the shared constraints (γ = x0)
-    B_sh_γ = Matrix{Float64}([zeros(prob.Thor * prob.m_u, prob.nx); -1 * C̅_x * Θ])
+    A_sh_input = [Matrix{Float64}(BlockDiagonal([prob.C_u[t][i] for t in 1:prob.Thor])) for i in 1:prob.N]
+    b_input = vcat(prob.b_u...)
+    B_input_γ = zeros(prob.Thor * prob.m_u, prob.nx)  # Maps from x₀ to shared input constraints
 
-    # Local constraints, per agent (independent of x0)
-    A_loc = [Matrix{Float64}(BlockDiagonal([prob.C_loc[t][i] for t in 1:prob.Thor])) for i in 1:prob.N]
-    b_loc = [vcat([prob.b_loc[t][i] for t in 1:prob.Thor]...) for i in 1:prob.N]
-    B_loc_γ = [zeros(length(b_loc[i]), prob.nx) for i in 1:prob.N]
+    # If state constraints are softened: introduce slack sᵢ
+    # Cₓ*x[t] ≤ bₓ + sᵢᵗ ∀ t
+    # ==> C̅ₓΓu̅ <= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅  + sᵢ, ∀ i 
+    # ==> [C̅ₓΓᵢ -I] [u̅; sᵢ] +  ∑ⱼ C̅ₓΓⱼ u̅ⱼ <= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅, ∀ i 
+    # Define Aₓⁱ = C̅ₓΓᵢ:
+    # ==> [Aₓⁱ -I] [u̅ᵢ; sᵢ] + ∑ⱼ [Aₓʲ 0] [u̅ⱼ; sⱼ]<= b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅ᵢ, ∀ i 
+    # Therefore, we need to introduce one shared constraint per agent (A_sh[i] is built
+    # further below).
+    A_sh_state = [Matrix{Float64}(C̅_x * Γi[i]) for i in 1:prob.N]
+    b_state = vcat(prob.b_x...) - C̅_x * c̅
+    B_state_γ = -1 * C̅_x * Θ
+    n_slack = length(b_state)
+
+    n_copies = soften_state_constraints ? prob.N : 1
+    b_sh = vcat(b_input, repeat(b_state, n_copies))
+    B_sh_γ = vcat(B_input_γ, repeat(B_state_γ, n_copies, 1))
+
+    Q = Vector{Vector{Matrix{Float64}}}(undef, prob.N)
+    Q_qγ = Vector{Matrix{Float64}}(undef, prob.N)
+    q_static = Vector{Vector{Float64}}(undef, prob.N)
+    A_loc = Vector{Matrix{Float64}}(undef, prob.N)
+    b_loc = Vector{Vector{Float64}}(undef, prob.N)
+    B_loc_γ = Vector{Matrix{Float64}}(undef, prob.N)
+    A_sh = Vector{Matrix{Float64}}(undef, prob.N)
+
+    for i in 1:prob.N
+        QiΓ = Γi[i]' * Q̅[i]
+        Qi = [Matrix{Float64}(QiΓ * Γi[j] + BlockDiagonal([prob.R[t][i][j] for t = 1:prob.Thor])) for j in 1:prob.N]
+
+        q̅i = vcat([prob.q[t][i] for t in 1:prob.Thor-1]..., prob.p[i])
+        r̅i = vcat([prob.r[t][i] for t in 1:prob.Thor]...)
+        qi = Γi[i]' * (Q̅[i] * c̅ + q̅i) + r̅i
+        Qqγ_i = Matrix{Float64}(QiΓ * Θ)
+
+        Aloc_i = Matrix{Float64}(BlockDiagonal([prob.C_loc[t][i] for t in 1:prob.Thor]))
+        bloc_i = vcat([prob.b_loc[t][i] for t in 1:prob.Thor]...)
+
+        if soften_state_constraints
+            n_slack = prob.m_x * prob.Thor # number of slack variables per agent i
+
+            # Pad Q with zeros (associated to slack variable)
+            Q[i] = [vcat(hcat(Qij, zeros(size(Qij, 1), n_slack)), zeros(n_slack, size(Qij, 2) + n_slack)) for Qij in Qi]
+            Q_qγ[i] = vcat(Qqγ_i, zeros(n_slack, prob.nx))
+            # Add linear cost on slack variable
+            q_static[i] = vcat(qi, kron(ones(prob.Thor), k[i]))
+            
+            # Pad local input constraints with zeros (associated to slack variable)
+            # Add local constraints that slack variable is ≥0
+            A_loc[i] = vcat(hcat(Aloc_i, zeros(size(Aloc_i, 1), n_slack)),
+                             hcat(zeros(n_slack, size(Aloc_i, 2)), -Matrix{Float64}(I(n_slack))))
+            b_loc[i] = vcat(bloc_i, zeros(n_slack))
+            B_loc_γ[i] = zeros(length(bloc_i) + n_slack, prob.nx)
+
+            # See above: soft state constraint becomes
+            # [Aₓⁱ -I] [u̅ᵢ; sᵢ] + ∑ⱼ [Aₓʲ 0] [u̅ⱼ; sⱼ] ≤ b̅ₓ -C̅ₓΘx₀ - C̅ₓc̅ᵢ, ∀ i 
+            A_sh[i] = vcat(hcat(A_sh_input[i], zeros(size(A_sh_input[i], 1), n_slack)),
+                vcat([hcat(A_sh_state[i], (i == j) * (-Matrix{Float64}(I(n_slack)))) for j in 1:n_copies]...))
+        else
+            Q[i] = Qi
+            Q_qγ[i] = Qqγ_i
+            q_static[i] = qi
+
+            A_loc[i] = Aloc_i
+            b_loc[i] = bloc_i
+            B_loc_γ[i] = zeros(length(bloc_i), prob.nx)
+
+            A_sh[i] = vcat(A_sh_input[i], A_sh_state[i])
+        end
+    end
 
     return LQGNEP(Q, q_static, A_loc, b_loc, A_sh, b_sh;
         Q_qγ=Q_qγ, B_loc_γ=B_loc_γ, B_sh_γ=B_sh_γ)
@@ -138,14 +266,18 @@ converting it with `mpAVI(::LQGNEP)`.
 # Arguments
 - `prob::DynLQGame`: Dynamic game structure containing system dynamics, cost, and constraints.
 - `T_hor::Int64`: Prediction horizon.
+- `soften_state_constraints::Bool`, `k`: forwarded to [`DynLQGame2LQGNEP`](@ref); see its
+  docstring for their meaning.
 
 # Returns
 - `mpAVI`: the parametric variational inequality
   ``\mathrm{VI}(Hu + Fx_0 + f,\ Au \leq Bx_0 + b)``, where ``u`` is the stacked input
   sequence for all agents and ``x_0`` is the initial state.
 """
-function DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64)
-    return mpAVI(DynLQGame2LQGNEP(prob, T_hor))
+function DynLQGame2mpAVI(prob::DynLQGame, T_hor::Int64;
+    soften_state_constraints::Bool=false,
+    k::Union{Nothing,Vector{Vector{Float64}}}=nothing)
+    return mpAVI(DynLQGame2LQGNEP(prob, T_hor; soften_state_constraints, k))
 end
 
 @doc raw"""
@@ -159,14 +291,18 @@ dynamic Nash equilibrium problem (`DynLQGameTV`) over its (fixed) prediction hor
 # Arguments
 - `prob::DynLQGameTV`: Time-varying dynamic game structure containing system dynamics, cost,
   and constraints.
+- `soften_state_constraints::Bool`, `k`: forwarded to [`DynLQGame2LQGNEP`](@ref); see its
+  docstring for their meaning.
 
 # Returns
 - `mpAVI`: the parametric variational inequality
   ``\mathrm{VI}(Hu + Fx_0 + f,\ Au \leq Bx_0 + b)``, where ``u`` is the stacked input
   sequence for all agents and ``x_0`` is the initial state.
 """
-function DynLQGame2mpAVI(prob::DynLQGameTV)
-    return mpAVI(DynLQGame2LQGNEP(prob))
+function DynLQGame2mpAVI(prob::DynLQGameTV;
+    soften_state_constraints::Bool=false,
+    k::Union{Nothing,Vector{Vector{Float64}}}=nothing)
+    return mpAVI(DynLQGame2LQGNEP(prob; soften_state_constraints, k))
 end
 
 @doc raw"""

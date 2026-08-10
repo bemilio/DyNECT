@@ -8,6 +8,7 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "Getting Started" => "getting_started.md",
+        "From DynLQGame to LQGNEP" => "lqgame_to_lqgnep.md",
         "API Reference" => "api.md",
     ],
 )
