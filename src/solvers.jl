@@ -744,3 +744,39 @@ function CommonSolve.solve!(solver::PWAConvexOptSolver)
     solver.status[] = :Solved
     return (x=sol.u_star, ϕ=sol.φ_star)
 end
+
+
+
+### SLS-based solver
+
+struct SLSSolver
+    game::DynLQGame
+    model::JuMP.Model
+    ϕ_x::Matrix{JuMP.VariableRef}
+    ϕ_u::Vector{<:AbstractMatrix}
+    status::Ref{Symbol}
+end
+
+# Construct SLS response matrix as a lower-block-triangular decision variable
+function causal_response_variable(model::JuMP.Model, T_hor::Int64, n_row::Int64, n_col::Int64)
+    rows = [hcat([τ <= t ? @variable(model, [1:n_row, 1:n_col]) : zeros(n_row, n_col) for τ in 1:T_hor]...) for t in 1:T_hor]
+    return vcat(rows...)
+end
+
+function CommonSolve.init(game::DynLQGame, ::Type{SLSSolver}, T_hor::Int64)
+    A̅ = kron(I(T_hor), game.A)
+    B̅ = [kron(I(T_hor), Bi) for Bi in game.B]
+    Z = diagm(-1 => ones(T_hor - 1))
+    Z̅ = kron(Z, I(game.nx))
+    n_x = T_hor * game.nx
+
+    model = Model(Clarabel.Optimizer)
+    set_silent(model)
+    ϕ_x = causal_response_variable(model, T_hor, game.nx, game.nx)
+    ϕ_u = [causal_response_variable(model, T_hor, game.nu[i], game.nx) for i in 1:game.N]
+    M = vcat(ϕ_x, ϕ_u...)
+    @constraint(model, [Z̅-A̅ -1.0.*hcat(B̅...)] * M .== I(n_x))
+    @objective(model, Min, sum(M .^ 2)) # placeholder objective
+
+    return SLSSolver(game, model, ϕ_x, ϕ_u, Ref(:Initialized))
+end
