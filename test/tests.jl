@@ -141,7 +141,7 @@ end
     x = 10 * rand(nx)
 
     # Solve infinite horizon problem
-    P, K = DyNECT.solveOLNE(prob)
+    P, K, _ = DyNECT.solveOLNE(prob)
     prob.P[:] = P[:]
     u_inf = vcat(K...) * x
 
@@ -313,7 +313,7 @@ end
     x = 10 * rand(nx)
 
     # Solve infinite horizon problem
-    P, K = DyNECT.solveCLNE(prob)
+    P, K, _ = DyNECT.solveCLNE(prob)
 
     # Test solution
     riccati_residual = 0.0

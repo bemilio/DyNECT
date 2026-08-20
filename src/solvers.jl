@@ -751,10 +751,13 @@ end
 
 struct SLSSolver
     game::DynLQGame
-    model::JuMP.Model
-    ϕ_x::Matrix{JuMP.VariableRef}
-    ϕ_u::Vector{<:AbstractMatrix}
+    T_hor::Int64
+    SLS_mats::NamedTuple
+    agent_models::Vector{<:NamedTuple} # per-agent (model, ϕ_x, ϕ_u_i, con) built once in init
+    K::Vector{Matrix{Float64}}
+    params::IterativeSolverParams
     status::Ref{Symbol}
+    last_res::Ref{Float64}
 end
 
 # Construct SLS response matrix as a lower-block-triangular decision variable
@@ -763,20 +766,86 @@ function causal_response_variable(model::JuMP.Model, T_hor::Int64, n_row::Int64,
     return vcat(rows...)
 end
 
-function CommonSolve.init(game::DynLQGame, ::Type{SLSSolver}, T_hor::Int64)
+function CommonSolve.init(game::DynLQGame, ::Type{SLSSolver}, T_hor::Int64;
+    Σ::AbstractMatrix=Matrix{Float64}(I, T_hor * game.nx, T_hor * game.nx),
+    params::IterativeSolverParams=IterativeSolverParams())
+    @assert isposdef(Σ) "Σ must be positive definite"
+
     A̅ = kron(I(T_hor), game.A)
     B̅ = [kron(I(T_hor), Bi) for Bi in game.B]
     Z = diagm(-1 => ones(T_hor - 1))
     Z̅ = kron(Z, I(game.nx))
-    n_x = T_hor * game.nx
+    U_Σ = sqrt(Symmetric(Σ)) # Matrix square root: handles PSD (possibly rank-deficient) weights, unlike cholesky
+    U_Q = [kron(I(T_hor), sqrt(Symmetric(game.Q[i]))) for i in 1:game.N]
+    U_R = [kron(I(T_hor), sqrt(Symmetric(game.R[i][i]))) for i in 1:game.N]
+    SLS_mats = (; A̅, B̅, Z̅, U_Σ, U_Q, U_R)
 
-    model = Model(Clarabel.Optimizer)
-    set_silent(model)
-    ϕ_x = causal_response_variable(model, T_hor, game.nx, game.nx)
-    ϕ_u = [causal_response_variable(model, T_hor, game.nu[i], game.nx) for i in 1:game.N]
-    M = vcat(ϕ_x, ϕ_u...)
-    @constraint(model, [Z̅-A̅ -1.0.*hcat(B̅...)] * M .== I(n_x))
-    @objective(model, Min, sum(M .^ 2)) # placeholder objective
+    # Each agent's decision variables and (K-independent) objective only need to be built
+    # once: across best-response iterations, only the dynamics constraint changes (it
+    # depends on the other agents' current controllers), so only that gets replaced in solve!.
+    agent_models = map(1:game.N) do i
+        model = Model(Clarabel.Optimizer)
+        set_silent(model)
+        ϕ_x = causal_response_variable(model, T_hor, game.nx, game.nx)
+        ϕ_u_i = causal_response_variable(model, T_hor, game.nu[i], game.nx)
+        # R_Q[i]*ϕ_x*R_Σ, where R_Q[i]'*R_Q[i] = kron(I(T_hor), game.Q[i]) and R_Σ'*R_Σ = Σ
+        weighted_ϕ_x = U_Q[i] * ϕ_x * U_Σ
+        weighted_ϕ_u = U_R[i] * ϕ_u_i * U_Σ
+        @objective(model, Min, sum(weighted_ϕ_x .^ 2) + sum(weighted_ϕ_u .^ 2)) # Frobenius norms
+        (; model, ϕ_x, ϕ_u_i, con=Ref{Any}(nothing))
+    end
 
-    return SLSSolver(game, model, ϕ_x, ϕ_u, Ref(:Initialized))
+    # Controllers, updated in place by solve!
+    K = [zeros(T_hor * game.nu[i], T_hor * game.nx) for i in 1:game.N]
+
+    return SLSSolver(game, T_hor, SLS_mats, agent_models, K, params, Ref(:Initialized), Ref(Inf))
+end
+
+function CommonSolve.solve!(solver::SLSSolver)
+    n_x = solver.T_hor * solver.game.nx
+    t0 = time()
+    res = Inf
+    for k in 1:solver.params.max_iter
+        res = 0.0
+        for i in 1:solver.game.N
+            am = solver.agent_models[i]
+
+            # Dynamics as seen by agent i, controlled in closed loop by every other agent's current K
+            A_K = sum((solver.SLS_mats.B̅[j] * solver.K[j] for j in 1:solver.game.N if j != i);
+                init=solver.SLS_mats.A̅)
+
+            isnothing(am.con[]) || delete(am.model, vec(am.con[])) # Reset constraints
+            M = vcat(am.ϕ_x, am.ϕ_u_i) # Decision variable of agent i
+            am.con[] = @constraint(am.model, hcat(solver.SLS_mats.Z̅ - A_K, -solver.SLS_mats.B̅[i]) * M .== I(n_x))
+
+            optimize!(am.model)
+            if termination_status(am.model) != OPTIMAL
+                solver.status[] = :Infeasible
+                @warn "[SLSSolver] Agent $i best-response problem not solved to optimality (status = $(termination_status(am.model)))"
+                return (K=solver.K, status=solver.status[])
+            end
+
+            K_new = value.(am.ϕ_u_i) / value.(am.ϕ_x)
+            res = max(res, norm(K_new - solver.K[i]))
+            solver.K[i] = K_new
+        end
+
+        solver.params.verbose && println("Iteration $k, residual = $res")
+
+        if res < solver.params.tol
+            solver.status[] = :Solved
+            break
+        end
+        if k == solver.params.max_iter
+            solver.status[] = :MaximumIterationsReached
+            @warn "[SLSSolver] Maximum iterations reached, residual = $res"
+            break
+        end
+        if time() - t0 > solver.params.time_limit
+            solver.status[] = :TimeLimitReached
+            break
+        end
+    end
+    solver.last_res[] = res
+    return (K=solver.K, status=solver.status[], residual=res)
 end

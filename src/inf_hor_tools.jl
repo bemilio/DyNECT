@@ -6,9 +6,12 @@
 Solve the infinite-horizon **Open-Loop Nash Equilibrium** (OLNE) for a linear-quadratic game
 using a fixed-point iteration (STEIN method, [Freiling-Jank-Kandil '99]).
 
-Returns `(P, Ki)` where:
+Returns `(P, Ki, residual)` where:
 - `P::Vector{Matrix}`: Value-function matrices for each agent.
 - `Ki::Vector{Matrix}`: Open-loop gain matrices ``K_i`` such that ``u_i = K_i x``.
+- `residual::Float64`: Final Riccati-equation residual (see [Freiling-Jank-Kandil '99], eq. (9)).
+  A warning is issued if `max_iter` is reached without the residual dropping below the internal
+  convergence tolerance.
 
 !!! note
     Affine terms (`q`, `r`, `c`) and cross-input weights (off-diagonal `R[i][j]`) are ignored;
@@ -48,6 +51,8 @@ function solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
     R_all = BlockDiagonal([game.R[i][i] for i in 1:game.N])
     P_0, _, K, _, _ = ared(game.A, hcat(game.B...), R_all, sum(game.Q), zeros(game.nx, sum(game.nu)))
     K = -K # Controller convention
+    err = Inf
+    converged = false
     for k = 1:max_iter
         A_cl = game.A + hcat(game.B...) * K
         for i = 1:game.N
@@ -55,30 +60,32 @@ function solveOLNE(game::DynLQGame; method=STEIN, max_iter=1000, stepsize=0.1)
                 P[i] = (1 - stepsize) * P[i] + stepsize * sylvd(-game.A', A_cl, game.Q[i]) # Solves P[i] - A' * P[i] * A_cl = Q[i]
             catch e
                 @warn "[solveOLNE] Sylvester equation failed: $e"
-                return nothing
+                return nothing, nothing, Inf
             end
         end
         A_cl = (I(game.nx) + S * vcat(P...)) \ game.A # Closed loop matrix
         K = -RinvB * vcat(P...) * A_cl # K_i = Ri_inv * B'* Pi * A_cl
-        if mod(k, 10) == 0
-            # Test solution: Check if (9) [Freiling-Jank-Kandil '99] is satisfied
-            err = 0
-            A_cl = (I(game.nx) + S * vcat(P...)) \ game.A # Closed loop matrix
-            for i = 1:game.N
-                err = err + norm(game.Q[i] - P[i] + game.A' * P[i] * A_cl)
-            end
-            if err < eps_err
-                if maximum(abs.(eigvals(A_cl))) > 1.0
-                    @warn "[solveInfHorOL] The solution is found, but it is not stabilizing"
-                end
-                break
-            end
+        # Test solution: Check if (9) [Freiling-Jank-Kandil '99] is satisfied
+        err = 0.0
+        A_cl = (I(game.nx) + S * vcat(P...)) \ game.A # Closed loop matrix
+        for i = 1:game.N
+            err = err + norm(game.Q[i] - P[i] + game.A' * P[i] * A_cl)
         end
+        if err < eps_err
+            converged = true
+            if maximum(abs.(eigvals(A_cl))) > 1.0
+                @warn "[solveInfHorOL] The solution is found, but it is not stabilizing"
+            end
+            break
+        end
+    end
+    if !converged
+        @warn "[solveOLNE] Reached max_iter=$max_iter without convergence (residual = $err)"
     end
     s = cumsum([0; game.nu]) # gives [0, nu[1], nu[1]+nu[2], ..., sum(nu)]
     # Separate controllers into list
     Ki = [K[s[i]+1:s[i+1], :] for i in 1:game.N]
-    return P, Ki
+    return P, Ki, err
 end
 
 @doc raw"""
@@ -114,9 +121,11 @@ end
 Solve the infinite-horizon **Closed-Loop Nash Equilibrium** (CLNE) via a simultaneous
 Algebraic Riccati Equation (ARE) fixed-point iteration.
 
-Returns `(P, K)` where:
+Returns `(P, K, residual)` where:
 - `P::Vector{Matrix}`: Value-function matrices for each agent.
 - `K::Vector{Matrix}`: Feedback gain matrices ``K_i`` such that ``u_i = K_i x``.
+- `residual::Float64`: Final simultaneous-ARE residual. A warning is issued if `max_iter` is
+  reached without the residual dropping below the internal convergence tolerance.
 
 !!! note
     Affine terms (`q`, `r`, `c`) and cross-input weights (off-diagonal `R[i][j]`) are not
@@ -141,7 +150,9 @@ function solveCLNE(game::DynLQGame; max_iter=1000, stepsize=0.1)
     idx = cumsum([1; game.nu])
     K = [K_collab[idx[i]:(idx[i+1]-1), :] for i in 1:game.N]
     P = [zeros(game.nx, game.nx) for _ in 1:game.N]
-    
+
+    riccati_residual = Inf
+    converged = false
     for k=1:max_iter
         for i in 1:game.N
             # println("Solving are, iter. $k, agent $i")
@@ -161,10 +172,15 @@ function solveCLNE(game::DynLQGame; max_iter=1000, stepsize=0.1)
         end
 
         if riccati_residual < eps_err
+            converged = true
             break
         end
     end
 
-    return P, K
+    if !converged
+        @warn "[solveCLNE] Reached max_iter=$max_iter without convergence (residual = $riccati_residual)"
+    end
+
+    return P, K, riccati_residual
 
 end
