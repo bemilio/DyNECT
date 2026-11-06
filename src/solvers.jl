@@ -386,6 +386,62 @@ function CommonSolve.solve!(solver::DGSQPSolver)
 end
 
 
+@doc raw"""
+    DAQPSolver
+
+Wrapper around the native AVI solver of [DAQP](https://darnstrom.github.io/daqp/start/advanced/avi)
+(DR-DAQP), for
+```math
+\mathrm{VI}(Hx + f,\ Ax \leq b).
+```
+`init` sets up the DAQP workspace (including its factorizations); `solve!` runs the solver.
+`params.max_iter`, `params.tol` and `params.time_limit` are mapped to DAQP's `iter_limit`,
+`primal_tol` and `time_limit` settings. With `warmstart = :UnconstrainedSolution` the
+unconstrained solution `-H \ f` is used as primal start. With `eval_residual = false`, `solve!`
+skips the evaluation of the natural residual (see [`compute_residual`](@ref)) and returns
+`residual = NaN`, e.g. to time the solver alone.
+
+Based on: "DR-DAQP: A Hybrid Operator Splitting and Active-Set Solver for Affine Variational
+Inequalities", D. Arnström, E. Benenati, G. Belgioioso, 2026.
+"""
+struct DAQPSolver
+    prob::AVI
+    model::DAQP.Model
+    eval_residual::Bool
+    params::IterativeSolverParams
+end
+
+function CommonSolve.init(prob::AVI, ::Type{DAQPSolver}; eval_residual::Bool=true, params::IterativeSolverParams=IterativeSolverParams())
+    if params.warmstart == :UnconstrainedSolution
+        primal_start = -prob.H \ prob.f
+    else
+        params.warmstart != :NoWarmStart && @warn "[DAQPSolver initialization] Requested warmstart not implemented."
+        primal_start = Float64[]
+    end
+
+    model = DAQP.Model()
+    exitflag, _ = DAQP.setup(model, Matrix{Float64}(prob.H), Vector{Float64}(prob.f), Matrix{Float64}(prob.A),
+        Vector{Float64}(prob.b), Float64[], zeros(Cint, prob.m); is_avi=true, primal_start=primal_start)
+    exitflag < 0 && @warn "[DAQPSolver initialization] Setup failed with exit flag $exitflag"
+    DAQP.settings(model, Dict(:iter_limit => params.max_iter, :primal_tol => params.tol,
+        :time_limit => params.time_limit))
+    return DAQPSolver(prob, model, eval_residual, params)
+end
+
+function CommonSolve.solve!(solver::DAQPSolver)
+    x, _, exitflag, info = DAQP.solve(solver.model)
+    status = exitflag > 0 ? :Solved :
+             exitflag == -1 ? :Infeasible :
+             exitflag == -4 ? :MaximumIterationsReached :
+             exitflag == -7 ? :TimeLimitReached : info.status
+    x = copy(x) # DAQP returns a view on its internal buffer
+    res = !solver.eval_residual ? NaN : isempty(x) ? Inf : compute_residual(solver.prob, x)
+    status != :Solved && @warn "[DAQPSolver::solve] DAQP returned $(info.status), residual = $res"
+    solver.params.verbose && println("[DAQPSolver] Status = $(info.status), iterations = $(info.iterations), residual = $res")
+    return (x=x, status=status, residual=res, iterations=info.iterations)
+end
+
+
 #### DynLQGame solvers ####
 
 """
