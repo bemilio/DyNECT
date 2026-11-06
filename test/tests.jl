@@ -25,6 +25,38 @@ using CommonSolve
 
 end
 
+@testset "DAQPSolver.jl" begin
+    # Unconstrained AVI with known solution [1; 0]
+    H = [1. 1.; -1. 1.]
+    f = [-1., 1.]
+    avi = DyNECT.AVI(H, f, zeros(0, 2), zeros(0))
+    solution = CommonSolve.solve(avi, DyNECT.DAQPSolver)
+    @test solution.status == :Solved
+    @test norm(solution.x - [1., 0.]) < 1e-6
+
+    # Constrained, strongly monotone, asymmetric AVI: compare against Douglas-Rachford
+    using Random
+    rng = MersenneTwister(3)
+    n, m = 8, 20
+    Ms, Ma = randn(rng, n, n), randn(rng, n, n)
+    H = Ms' * Ms + I + (Ma' - Ma)
+    f = randn(rng, n)
+    A = randn(rng, m, n)
+    b = A * randn(rng, n) + rand(rng, m) # feasible by construction
+    avi = DyNECT.AVI(H, f, A, b)
+    params = DyNECT.IterativeSolverParams(tol=1e-8)
+    sol_daqp = CommonSolve.solve(avi, DyNECT.DAQPSolver; params=params)
+    @test sol_daqp.status == :Solved
+    @test sol_daqp.residual < 1e-6
+    sol_dr = CommonSolve.solve(avi, DyNECT.DouglasRachford;
+        params=DyNECT.IterativeSolverParams(max_iter=10000, tol=1e-8, time_limit=30.0))
+    @test norm(sol_daqp.x - sol_dr.x) < 1e-4
+
+    # Warm start from the unconstrained solution
+    warm = DyNECT.IterativeSolverParams(tol=1e-8, warmstart=:UnconstrainedSolution)
+    @test CommonSolve.solve(avi, DyNECT.DAQPSolver; params=warm).status == :Solved
+end
+
 
 @testset "generate_prediction_model.jl" begin
     using Random
