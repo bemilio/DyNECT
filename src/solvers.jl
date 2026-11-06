@@ -803,13 +803,14 @@ end
 
 
 
-### SLS-based solver
+### SLS-based solvers
 
-struct SLSSolver
+# SLS_BR_K: best response in the SLS sense, formulated fixing K of the other agents
+struct SLS_BR_K
     game::DynLQGame
     T_hor::Int64
     SLS_mats::NamedTuple
-    agent_models::Vector{<:NamedTuple} # per-agent (model, ϕ_x, ϕ_u_i, con) built once in init
+    BR::Vector{<:Function} # BR[i](K) -> (; model, ϕ_x, ϕ_u_i): agent i's best response given the controllers K
     K::Vector{Matrix{Float64}}
     params::IterativeSolverParams
     status::Ref{Symbol}
@@ -822,7 +823,7 @@ function causal_response_variable(model::JuMP.Model, T_hor::Int64, n_row::Int64,
     return vcat(rows...)
 end
 
-function CommonSolve.init(game::DynLQGame, ::Type{SLSSolver}, T_hor::Int64;
+function CommonSolve.init(game::DynLQGame, ::Type{SLS_BR_K}, T_hor::Int64;
     Σ::AbstractMatrix=Matrix{Float64}(I, T_hor * game.nx, T_hor * game.nx),
     params::IterativeSolverParams=IterativeSolverParams())
     @assert isposdef(Σ) "Σ must be positive definite"
@@ -831,57 +832,51 @@ function CommonSolve.init(game::DynLQGame, ::Type{SLSSolver}, T_hor::Int64;
     B̅ = [kron(I(T_hor), Bi) for Bi in game.B]
     Z = diagm(-1 => ones(T_hor - 1))
     Z̅ = kron(Z, I(game.nx))
-    U_Σ = sqrt(Symmetric(Σ)) # Matrix square root: handles PSD (possibly rank-deficient) weights, unlike cholesky
+    U_Σ = sqrt(Symmetric(Σ))
     U_Q = [kron(I(T_hor), sqrt(Symmetric(game.Q[i]))) for i in 1:game.N]
     U_R = [kron(I(T_hor), sqrt(Symmetric(game.R[i][i]))) for i in 1:game.N]
     SLS_mats = (; A̅, B̅, Z̅, U_Σ, U_Q, U_R)
 
-    # Each agent's decision variables and (K-independent) objective only need to be built
-    # once: across best-response iterations, only the dynamics constraint changes (it
-    # depends on the other agents' current controllers), so only that gets replaced in solve!.
-    agent_models = map(1:game.N) do i
-        model = Model(Clarabel.Optimizer)
-        set_silent(model)
-        ϕ_x = causal_response_variable(model, T_hor, game.nx, game.nx)
-        ϕ_u_i = causal_response_variable(model, T_hor, game.nu[i], game.nx)
-        # R_Q[i]*ϕ_x*R_Σ, where R_Q[i]'*R_Q[i] = kron(I(T_hor), game.Q[i]) and R_Σ'*R_Σ = Σ
-        weighted_ϕ_x = U_Q[i] * ϕ_x * U_Σ
-        weighted_ϕ_u = U_R[i] * ϕ_u_i * U_Σ
-        @objective(model, Min, sum(weighted_ϕ_x .^ 2) + sum(weighted_ϕ_u .^ 2)) # Frobenius norms
-        (; model, ϕ_x, ϕ_u_i, con=Ref{Any}(nothing))
+    # BR[i] maps the controllers K to agent i's best-response problem
+    BR = map(1:game.N) do i
+        K -> begin
+            model = Model(Clarabel.Optimizer)
+            set_silent(model)
+            ϕ_x = causal_response_variable(model, T_hor, game.nx, game.nx)
+            ϕ_u_i = causal_response_variable(model, T_hor, game.nu[i], game.nx)
+            weighted_ϕ_x = U_Q[i] * ϕ_x * U_Σ
+            weighted_ϕ_u = U_R[i] * ϕ_u_i * U_Σ
+            @objective(model, Min, sum(weighted_ϕ_x .^ 2) + sum(weighted_ϕ_u .^ 2)) # Frobenius norms
+
+            # Dynamics as seen by agent i, controlled in closed loop by every other agent's K
+            A_K = sum((B̅[j] * K[j] for j in 1:game.N if j != i); init=A̅)
+            # SLS constraint
+            @constraint(model, hcat(I(game.nx * T_hor) - Z̅ * A_K, -Z̅ * B̅[i]) * vcat(ϕ_x, ϕ_u_i) .== I(game.nx * T_hor))
+            (; model, ϕ_x, ϕ_u_i)
+        end
     end
 
     # Controllers, updated in place by solve!
     K = [zeros(T_hor * game.nu[i], T_hor * game.nx) for i in 1:game.N]
 
-    return SLSSolver(game, T_hor, SLS_mats, agent_models, K, params, Ref(:Initialized), Ref(Inf))
+    return SLS_BR_K(game, T_hor, SLS_mats, BR, K, params, Ref(:Initialized), Ref(Inf))
 end
 
-function CommonSolve.solve!(solver::SLSSolver)
-    n_x = solver.T_hor * solver.game.nx
+function CommonSolve.solve!(solver::SLS_BR_K)
     t0 = time()
     res = Inf
     for k in 1:solver.params.max_iter
         res = 0.0
         for i in 1:solver.game.N
-            am = solver.agent_models[i]
-
-            # Dynamics as seen by agent i, controlled in closed loop by every other agent's current K
-            A_K = sum((solver.SLS_mats.B̅[j] * solver.K[j] for j in 1:solver.game.N if j != i);
-                init=solver.SLS_mats.A̅)
-
-            isnothing(am.con[]) || delete(am.model, vec(am.con[])) # Reset constraints
-            M = vcat(am.ϕ_x, am.ϕ_u_i) # Decision variable of agent i
-            am.con[] = @constraint(am.model, hcat(solver.SLS_mats.Z̅ - A_K, -solver.SLS_mats.B̅[i]) * M .== I(n_x))
-
-            optimize!(am.model)
-            if termination_status(am.model) != OPTIMAL
+            br = solver.BR[i](solver.K)
+            optimize!(br.model)
+            if termination_status(br.model) != OPTIMAL
                 solver.status[] = :Infeasible
-                @warn "[SLSSolver] Agent $i best-response problem not solved to optimality (status = $(termination_status(am.model)))"
+                @warn "[SLSSolver] Agent $i best-response problem not solved to optimality (status = $(termination_status(br.model)))"
                 return (K=solver.K, status=solver.status[])
             end
 
-            K_new = value.(am.ϕ_u_i) / value.(am.ϕ_x)
+            K_new = value.(br.ϕ_u_i) / value.(br.ϕ_x)
             res = max(res, norm(K_new - solver.K[i]))
             solver.K[i] = K_new
         end
@@ -904,4 +899,105 @@ function CommonSolve.solve!(solver::SLSSolver)
     end
     solver.last_res[] = res
     return (K=solver.K, status=solver.status[], residual=res)
+end
+
+#############
+
+
+# SLS_BR_ϕ: best response in the SLS sense, formulated fixing ϕ of the other agents (map from disturbance to trajectory)
+struct SLS_BR_ϕ
+    game::DynLQGame
+    T_hor::Int64
+    SLS_mats::NamedTuple
+    BR::Vector{<:Function} # BR[i](ϕ_u) -> (; model, ϕ_x, ϕ_u_i): agent i's best response given the other agents' ϕ_u
+    ϕ_u::Vector{Matrix{Float64}} # Current disturbance-to-input responses, updated in place by solve!
+    K::Vector{Matrix{Float64}} # Controllers K[i] = ϕ_u[i] * ϕ_x⁻¹, computed at the end of solve!
+    params::IterativeSolverParams
+    status::Ref{Symbol}
+    last_res::Ref{Float64}
+end
+
+function CommonSolve.init(game::DynLQGame, ::Type{SLS_BR_ϕ}, T_hor::Int64;
+    Σ::AbstractMatrix=Matrix{Float64}(I, T_hor * game.nx, T_hor * game.nx),
+    params::IterativeSolverParams=IterativeSolverParams())
+    @assert isposdef(Σ) "Σ must be positive definite"
+
+    A̅ = kron(I(T_hor), game.A)
+    B̅ = [kron(I(T_hor), Bi) for Bi in game.B]
+    Z = diagm(-1 => ones(T_hor - 1))
+    Z̅ = kron(Z, I(game.nx))
+    U_Σ = sqrt(Symmetric(Σ))
+    U_Q = [kron(I(T_hor), sqrt(Symmetric(game.Q[i]))) for i in 1:game.N]
+    U_R = [kron(I(T_hor), sqrt(Symmetric(game.R[i][i]))) for i in 1:game.N]
+    SLS_mats = (; A̅, B̅, Z̅, U_Σ, U_Q, U_R)
+
+    # BR[i] maps the controllers ϕu to agent i's best-response problem (map from disturbance to input)
+    BR = map(1:game.N) do i
+        ϕu -> begin
+            model = Model(Clarabel.Optimizer)
+            set_silent(model)
+            ϕ_x = causal_response_variable(model, T_hor, game.nx, game.nx)
+            ϕ_u_i = causal_response_variable(model, T_hor, game.nu[i], game.nx)
+            weighted_ϕ_x = U_Q[i] * ϕ_x * U_Σ
+            weighted_ϕ_u = U_R[i] * ϕ_u_i * U_Σ
+            @objective(model, Min, sum(weighted_ϕ_x .^ 2) + sum(weighted_ϕ_u .^ 2)) # Frobenius norms
+
+            # SLS constraint
+            ϕ_u_all = vcat([j == i ? ϕ_u_i : ϕu[j] for j in 1:game.N]...) # Plug the i-th agent decision variable in the given ϕu
+            @constraint(model, hcat(I(game.nx * T_hor) - Z̅ * A̅, -Z̅ * hcat(B̅...)) * vcat(ϕ_x, ϕ_u_all) .== I(game.nx * T_hor))
+            (; model, ϕ_x, ϕ_u_i)
+        end
+    end
+
+    ϕ_u = [zeros(T_hor * game.nu[i], T_hor * game.nx) for i in 1:game.N]
+    K = [zeros(T_hor * game.nu[i], T_hor * game.nx) for i in 1:game.N]
+
+    return SLS_BR_ϕ(game, T_hor, SLS_mats, BR, ϕ_u, K, params, Ref(:Initialized), Ref(Inf))
+end
+
+function CommonSolve.solve!(solver::SLS_BR_ϕ)
+    t0 = time()
+    res = Inf
+    for k in 1:solver.params.max_iter
+        res = 0.0
+        for i in 1:solver.game.N
+            br = solver.BR[i](solver.ϕ_u)
+            optimize!(br.model)
+            if termination_status(br.model) != OPTIMAL
+                solver.status[] = :Infeasible
+                @warn "[SLSSolver] Agent $i best-response problem not solved to optimality (status = $(termination_status(br.model)))"
+                return (K=solver.K, ϕ_u=solver.ϕ_u, status=solver.status[])
+            end
+
+            ϕ_u_new = value.(br.ϕ_u_i)
+            res = max(res, norm(ϕ_u_new - solver.ϕ_u[i]))
+            solver.ϕ_u[i] = ϕ_u_new
+        end
+
+        solver.params.verbose && println("Iteration $k, residual = $res")
+
+        if res < solver.params.tol
+            solver.status[] = :Solved
+            break
+        end
+        if k == solver.params.max_iter
+            solver.status[] = :MaximumIterationsReached
+            @warn "[SLSSolver] Maximum iterations reached, residual = $res"
+            break
+        end
+        if time() - t0 > solver.params.time_limit
+            solver.status[] = :TimeLimitReached
+            break
+        end
+    end
+    solver.last_res[] = res
+
+    # ϕ_x is determined by the ϕ_u's through the SLS constraint (I - Z̅A̅)ϕ_x = I + Z̅ ∑ B̅_j ϕ_u[j]
+    (; A̅, B̅, Z̅) = solver.SLS_mats
+    n_x = solver.T_hor * solver.game.nx
+    ϕ_x = (I(n_x) - Z̅ * A̅) \ (I(n_x) + Z̅ * sum(B̅[j] * solver.ϕ_u[j] for j in 1:solver.game.N))
+    for i in 1:solver.game.N
+        solver.K[i] = solver.ϕ_u[i] / ϕ_x
+    end
+    return (K=solver.K, ϕ_u=solver.ϕ_u, ϕ_x=ϕ_x, status=solver.status[], residual=res)
 end
